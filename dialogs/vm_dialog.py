@@ -31,24 +31,32 @@ class VMManagementDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
         self.refresh_vm_list()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
 
         # Верхняя панель с информацией
-        info_frame = ctk.CTkFrame(main_frame)
+        info_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         info_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -62,7 +70,7 @@ class VMManagementDialog:
         ).pack(side=tk.LEFT, padx=10, pady=5)
 
         # Панель кнопок
-        btn_frame = ctk.CTkFrame(main_frame)
+        btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         btn_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkButton(btn_frame, text="➕ Создать ВМ", command=self.create_vm, width=120, height=32).pack(side=tk.LEFT,
@@ -73,7 +81,7 @@ class VMManagementDialog:
                       fg_color="#F44336").pack(side=tk.LEFT, padx=5)
 
         # Таблица ВМ
-        table_frame = ctk.CTkFrame(main_frame)
+        table_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         columns = ("Имя ВМ", "ОС", "Кол-во портов", "ПО")
@@ -188,14 +196,21 @@ class VMCreationDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.show_loading_screen()
         self.dialog.after(100, self.load_data_async)
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -365,6 +380,8 @@ class VMCreationDialog:
                       font=("Arial", 13, "bold")).pack(side=tk.RIGHT, padx=5)
         ctk.CTkButton(btn_frame, text="✕ Отмена", command=self.dialog.destroy, fg_color="#CD3333", width=100,
                       height=38).pack(side=tk.RIGHT, padx=5)
+
+        self.center_window()
 
     def create_os_selector(self, parent):
         """Создаёт селектор для выбора ОС."""

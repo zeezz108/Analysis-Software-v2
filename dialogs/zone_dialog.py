@@ -52,14 +52,22 @@ class ZoneCreationDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         """Центрирует окно на экране."""
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -81,7 +89,7 @@ class ZoneCreationDialog:
         title_label.pack(pady=(15, 10))
 
         # ===== Фрейм для выбора типа зоны =====
-        type_frame = ctk.CTkFrame(self.dialog)
+        type_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         type_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -120,7 +128,7 @@ class ZoneCreationDialog:
         ).pack(anchor=tk.W, padx=20, pady=2)
 
         # ===== Фрейм для названия =====
-        name_frame = ctk.CTkFrame(self.dialog)
+        name_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         name_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -139,7 +147,7 @@ class ZoneCreationDialog:
         self.name_entry.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # ===== Фрейм для описания =====
-        desc_frame = ctk.CTkFrame(self.dialog)
+        desc_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         desc_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
 
         ctk.CTkLabel(
@@ -158,7 +166,7 @@ class ZoneCreationDialog:
         self.desc_entry.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # ===== Фрейм для кнопок =====
-        button_frame = ctk.CTkFrame(self.dialog)
+        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         button_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
 
         self.create_button = ctk.CTkButton(

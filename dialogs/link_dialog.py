@@ -30,13 +30,21 @@ class LinkPortSelectionDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -54,7 +62,7 @@ class LinkPortSelectionDialog:
         return mapping.get(node_type_en, node_type_en)
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Заголовок
@@ -71,7 +79,7 @@ class LinkPortSelectionDialog:
         ctk.CTkLabel(main_frame, text=info_text, font=("Arial", 12)).pack(pady=(0, 15))
 
         # Фрейм для выбора типа соединения
-        type_frame = ctk.CTkFrame(main_frame)
+        type_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         type_frame.pack(fill=tk.X, pady=(0, 15))
 
         ctk.CTkLabel(
@@ -116,14 +124,14 @@ class LinkPortSelectionDialog:
             ).pack(side=tk.LEFT)
 
         # Фрейм для выбора портов
-        self.ports_frame = ctk.CTkFrame(main_frame)
+        self.ports_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         self.ports_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
         # Изначально показываем Ethernet
         self.show_ethernet_ports()
 
         # Информация о соединении
-        info_frame = ctk.CTkFrame(main_frame)
+        info_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         info_frame.pack(fill=tk.X, pady=(10, 0))
 
         ctk.CTkLabel(

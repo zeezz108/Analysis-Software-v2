@@ -179,27 +179,42 @@ class ConnectivityMatrix:
         src_network = self._get_ip_network(src_ip)
         dst_network = self._get_ip_network(dst_ip)
 
-        # Если в одной сети, но нет прямого соединения — не соединяются
-        if src_network == dst_network:
-            return
-
-        # Ищем маршрутизатор, который знает обе сети
+        # Ищем маршрутизатор/коммутатор, через который оба узла соединены
         for router in self.board.nodes:
-            if router.type != "Router":
+            if router.type not in ("Router", "Switch"):
                 continue
 
             router_networks = self._get_all_node_networks(router)
 
-            if src_network in router_networks and dst_network in router_networks:
-                # Проверяем, есть ли у маршрутизатора маршруты
-                if self._router_has_routes(router, src_network, dst_network):
+            # Проверяем, подключены ли оба узла к этому маршрутизатору физически
+            src_linked = any(
+                (l.a.id == src.id and l.b.id == router.id) or (l.b.id == src.id and l.a.id == router.id)
+                for l in self.board.links
+            )
+            dst_linked = any(
+                (l.a.id == dst.id and l.b.id == router.id) or (l.b.id == dst.id and l.a.id == router.id)
+                for l in self.board.links
+            )
+
+            if src_linked and dst_linked:
+                if src_network == dst_network:
+                    # Одна подсеть, но через маршрутизатор/коммутатор
                     self._set_connection(
                         src.id, dst.id,
                         ConnectivityStatus.ROUTED,
                         path_nodes=[src.id, router.id, dst.id],
-                        reason=f"через маршрутизатор {router.name}"
+                        reason=f"через {router.name}"
                     )
-                break
+                    return
+                elif src_network in router_networks and dst_network in router_networks:
+                    if self._router_has_routes(router, src_network, dst_network):
+                        self._set_connection(
+                            src.id, dst.id,
+                            ConnectivityStatus.ROUTED,
+                            path_nodes=[src.id, router.id, dst.id],
+                            reason=f"через маршрутизатор {router.name}"
+                        )
+                    return
 
     def _router_has_routes(self, router: Node, src_network: str, dst_network: str) -> bool:
         """Проверяет, есть ли у маршрутизатора маршруты для обеих сетей."""
@@ -371,23 +386,24 @@ class ConnectivityMatrix:
 
     def _set_connection(self, src_id: str, dst_id: str, status: ConnectivityStatus,
                         path_nodes: List[str] = None, reason: str = ""):
-        """Устанавливает соединение в матрице."""
-        key = (src_id, dst_id)
-        if key in self.matrix:
-            # Не перезаписываем более высокий приоритет
-            current = self.matrix[key].status
-            priority = {ConnectivityStatus.DIRECT: 4, ConnectivityStatus.VPN: 3,
-                        ConnectivityStatus.ROUTED: 2, ConnectivityStatus.BLOCKED: 1,
-                        ConnectivityStatus.NONE: 0}
+        """Устанавливает соединение в матрице (в обе стороны)."""
+        priority = {ConnectivityStatus.DIRECT: 4, ConnectivityStatus.VPN: 3,
+                    ConnectivityStatus.ROUTED: 2, ConnectivityStatus.BLOCKED: 1,
+                    ConnectivityStatus.NONE: 0}
 
-            if priority.get(status, 0) > priority.get(current, 0):
-                self.matrix[key] = ConnectionPath(
-                    source_id=src_id,
-                    target_id=dst_id,
-                    status=status,
-                    path_nodes=path_nodes or [src_id, dst_id],
-                    reason=reason
-                )
+        for (s, d) in [(src_id, dst_id), (dst_id, src_id)]:
+            key = (s, d)
+            if key in self.matrix:
+                current = self.matrix[key].status
+                if priority.get(status, 0) > priority.get(current, 0):
+                    rev_path = list(reversed(path_nodes)) if path_nodes and s == dst_id else (path_nodes or [s, d])
+                    self.matrix[key] = ConnectionPath(
+                        source_id=s,
+                        target_id=d,
+                        status=status,
+                        path_nodes=rev_path,
+                        reason=reason
+                    )
 
     def can_communicate(self, node1_id: str, node2_id: str) -> Tuple[bool, ConnectivityStatus, str]:
         """Проверяет, могут ли два узла взаимодействовать."""

@@ -39,14 +39,22 @@ class FirewallDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
         self.refresh_rules_list()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -99,11 +107,11 @@ class FirewallDialog:
         return mapping.get(node_type_en, node_type_en)
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         # Верхняя панель с информацией
-        top_frame = ctk.CTkFrame(main_frame)
+        top_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         top_frame.pack(fill=tk.X, pady=(0, 10))
 
         # Заголовок
@@ -122,7 +130,8 @@ class FirewallDialog:
         ).pack(anchor=tk.W)
 
         # Статус брандмауэра
-        status_frame = ctk.CTkFrame(top_frame)
+        status_color = "#4CAF50" if self.manager.firewall_enabled else "#F44336"
+        status_frame = ctk.CTkFrame(top_frame, border_width=1, border_color=status_color, corner_radius=8)
         status_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         left_status = ctk.CTkFrame(status_frame, fg_color="transparent")
@@ -147,24 +156,24 @@ class FirewallDialog:
         self.toggle_firewall_btn.pack(side=tk.RIGHT, padx=10)
 
         # Основная область
-        content_frame = ctk.CTkFrame(main_frame)
+        content_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         content_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
         # Левая панель - фильтры
-        left_panel = ctk.CTkFrame(content_frame, width=220)
+        left_panel = ctk.CTkFrame(content_frame, width=220, fg_color="transparent")
         left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         left_panel.pack_propagate(False)
 
         self.create_left_navigation(left_panel)
 
         # Правая панель - правила
-        right_panel = ctk.CTkFrame(content_frame)
+        right_panel = ctk.CTkFrame(content_frame, fg_color="transparent")
         right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         self.create_rules_panel(right_panel)
 
         # Нижняя панель
-        bottom_frame = ctk.CTkFrame(main_frame)
+        bottom_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         bottom_frame.pack(fill=tk.X, pady=(10, 0))
 
         self.notify_var = tk.BooleanVar(value=self.manager.notification_enabled)
@@ -235,7 +244,7 @@ class FirewallDialog:
     def create_rules_panel(self, parent):
         """Создаёт панель с правилами."""
         # Панель инструментов
-        toolbar = ctk.CTkFrame(parent)
+        toolbar = ctk.CTkFrame(parent, fg_color="transparent")
         toolbar.pack(fill=tk.X, padx=10, pady=10)
 
         ctk.CTkButton(toolbar, text="➕ Создать", command=self.create_rule, width=110).pack(side=tk.LEFT, padx=2)
@@ -256,7 +265,7 @@ class FirewallDialog:
             side=tk.RIGHT)
 
         # Таблица правил
-        list_frame = ctk.CTkFrame(parent)
+        list_frame = ctk.CTkFrame(parent, fg_color="transparent")
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
         columns = ("Статус", "Действие", "Направление", "Протокол", "Локальный порт", "Удаленный порт")
@@ -474,19 +483,27 @@ class FirewallRuleDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Заголовок

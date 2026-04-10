@@ -66,8 +66,6 @@ class PropertiesDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
-
         if isinstance(element, Node):
             self.current_ports = [port.copy() for port in self.element.ports]
 
@@ -91,8 +89,16 @@ class PropertiesDialog:
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -255,6 +261,8 @@ class PropertiesDialog:
         else:
             self.create_node_widgets()
 
+        self.center_window()
+
     def create_zone_widgets(self):
         """Создаёт интерфейс для редактирования зоны."""
         # Заголовок
@@ -282,7 +290,7 @@ class PropertiesDialog:
         ctk.CTkEntry(desc_frame, textvariable=self.desc_var, height=35).pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # Кнопки
-        button_frame = ctk.CTkFrame(self.dialog)
+        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         button_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
 
         ctk.CTkButton(button_frame, text="Сохранить", command=self.save_zone, fg_color="#4CAF50", width=100,
@@ -312,7 +320,7 @@ class PropertiesDialog:
 
         config = self.get_node_config()
 
-        # Аппаратура
+        # Аппаратная архитектура
         if config.get("hardware_tabs"):
             self.notebook.add("Аппаратная архитектура")
             hw_frame = self.notebook.tab("Аппаратная архитектура")
@@ -324,10 +332,11 @@ class PropertiesDialog:
             sw_frame = self.notebook.tab("Программное обеспечение")
             self.create_software_editor(sw_frame, config["software_tabs"])
 
-        # Сеть
-        self.notebook.add("Сеть")
-        net_frame = self.notebook.tab("Сеть")
-        self.create_network_editor(net_frame, config)
+        # Сеть — не показываем для узла Интернет
+        if self.element.type != "Internet":
+            self.notebook.add("Сеть")
+            net_frame = self.notebook.tab("Сеть")
+            self.create_network_editor(net_frame, config)
 
         # Маршрутизация
         self.notebook.add("Маршрутизация")
@@ -340,11 +349,11 @@ class PropertiesDialog:
         self.create_security_editor(sec_frame)
 
         # Кнопки
-        button_frame = ctk.CTkFrame(self.dialog)
+        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         button_frame.pack(fill=tk.X, padx=20, pady=(10, 20))
 
         if self.element.type in ["ARM", "Laptop", "Router", "Switch", "Server"]:
-            ctk.CTkButton(button_frame, text="🛡️ Паспорт безопасности", command=self.open_security_passport,
+            ctk.CTkButton(button_frame, text="Паспорт безопасности", command=self.open_security_passport,
                           width=150).pack(side=tk.LEFT, padx=5)
 
         ctk.CTkButton(button_frame, text="Сохранить", command=self.save_node, fg_color="#4CAF50", width=100,
@@ -943,19 +952,23 @@ class ViewOnlyPropertiesDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
-        parent_x = self.parent.winfo_rootx()
-        parent_y = self.parent.winfo_rooty()
-        parent_width = self.parent.winfo_width()
-        parent_height = self.parent.winfo_height()
-        x = parent_x + (parent_width - width) // 2
-        y = parent_y + (parent_height - height) // 2
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
+        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def get_node_type_russian(self, node_type_en: str) -> str:
@@ -991,26 +1004,20 @@ class ViewOnlyPropertiesDialog:
         """Собирает все компоненты узла в структурированном виде с метаданными."""
 
         result = {
-            "🖥️ Аппаратура": [],
+            "🖥️ Аппаратная архитектура": [],
             "💿 Прикладное ПО": [],
             "🖱️ Периферия": [],
             "🌐 Сетевые порты": []
         }
 
-        # Список ключевых слов для периферии
-        peripheral_keywords = [
-            "мышь", "mouse", "клавиатур", "keyboard", "key pad",
-            "принтер", "printer", "мфу", "monitor", "монитор",
-            "display", "экран", "дисплей", "lcd", "led",
-            "A4Tech", "Logitech", "Razer", "Corsair", "HyperX",
-            "Bloody", "Genius", "Defender", "SteelSeries", "Zowie",
-            "HP", "Canon", "Epson", "Xerox", "Brother", "Samsung",
-            "Dell", "LG", "ViewSonic", "Asus", "Acer", "BenQ"
-        ]
-
-        def is_peripheral(text: str) -> bool:
-            text_lower = text.lower()
-            return any(keyword.lower() in text_lower for keyword in peripheral_keywords)
+        # Префиксы для классификации
+        hardware_prefixes = (
+            "Процессор:", "Видеоконтроллер:", "Материнская плата:",
+            "HDD/SSD:", "Аппаратная платформа:", "Оперативная память:",
+            "Диск:", "Сетевая карта:", "Платформа:"
+        )
+        peripheral_prefixes = ("Мышь:", "Клавиатура:", "Принтер:", "Монитор:")
+        software_prefixes = ("ОС:", "Приложение:")
 
         peripheral_categories = {
             "Мышь": [],
@@ -1019,46 +1026,44 @@ class ViewOnlyPropertiesDialog:
             "Монитор": []
         }
 
-        def categorize_peripheral(item: str):
-            item_lower = item.lower()
-            if "мышь" in item_lower or "mouse" in item_lower:
+        def categorize_by_prefix(item: str):
+            """Классифицирует элемент по его префиксу."""
+            if item.startswith("Мышь:"):
                 peripheral_categories["Мышь"].append(item)
-            elif "клавиатур" in item_lower or "keyboard" in item_lower:
+                return True
+            elif item.startswith("Клавиатура:"):
                 peripheral_categories["Клавиатура"].append(item)
-            elif "принтер" in item_lower or "мфу" in item_lower or "printer" in item_lower:
+                return True
+            elif item.startswith("Принтер:"):
                 peripheral_categories["Принтер/МФУ"].append(item)
-            elif "монитор" in item_lower or "monitor" in item_lower or "display" in item_lower:
+                return True
+            elif item.startswith("Монитор:"):
                 peripheral_categories["Монитор"].append(item)
-            else:
-                if "Другое" not in peripheral_categories:
-                    peripheral_categories["Другое"] = []
-                peripheral_categories["Другое"].append(item)
+                return True
+            return False
 
-        # 1. Аппаратура
+        # 1. Аппаратная архитектура
         hardware_items = self.node.properties.get("hardware", [])
-        print(f"[DEBUG] Hardware items: {hardware_items}")
         for item in hardware_items:
             if item and isinstance(item, str) and item.strip():
-                if is_peripheral(item):
-                    categorize_peripheral(item)
-                else:
-                    result["🖥️ Аппаратура"].append({"text": item, "type": "hardware"})
+                result["🖥️ Аппаратная архитектура"].append({"text": item, "type": "hardware"})
 
-        # 2. Программное обеспечение
+        # 2. Программное обеспечение и периферия
         software_items = self.node.properties.get("software", [])
-        print(f"[DEBUG] Software items: {software_items}")
         for item in software_items:
             if item and isinstance(item, str) and item.strip():
                 item_lower = item.lower()
-                if is_peripheral(item):
-                    categorize_peripheral(item)
-                elif "драйвер" in item_lower or "driver" in item_lower:
-                    pass
-                else:
-                    display_text = item
-                    if item.startswith("Приложение:"):
-                        display_text = item.replace("Приложение:", "Прикладное ПО:", 1)
-                    result["💿 Прикладное ПО"].append({"text": display_text, "type": "software"})
+                # Периферия по префиксу
+                if categorize_by_prefix(item):
+                    continue
+                # Пропускаем драйверы
+                if "драйвер" in item_lower or "driver" in item_lower:
+                    continue
+                # Прикладное ПО
+                display_text = item
+                if item.startswith("Приложение:"):
+                    display_text = item.replace("Приложение:", "Прикладное ПО:", 1)
+                result["💿 Прикладное ПО"].append({"text": display_text, "type": "software"})
 
         # 3. Периферия
         for category, items in peripheral_categories.items():
@@ -1106,7 +1111,7 @@ class ViewOnlyPropertiesDialog:
 
         # Заголовок
         title_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
-        title_frame.pack(fill=tk.X, padx=25, pady=(20, 10))
+        title_frame.pack(fill=tk.X, padx=25, pady=(15, 5))
 
         type_icons = {
             "Router": "📡",
@@ -1136,32 +1141,34 @@ class ViewOnlyPropertiesDialog:
             text_color="gray"
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
-        status_frame.pack(anchor=tk.W, pady=(10, 0))
+        has_status = self.node.firewall_enabled or self.node.vpn_client_enabled or self.node.vpn_server_enabled
+        if has_status:
+            status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
+            status_frame.pack(anchor=tk.W, pady=(5, 0))
 
-        if self.node.firewall_enabled:
-            ctk.CTkLabel(
-                status_frame,
-                text="🛡️ Файервол включён",
-                font=("Segoe UI", 11),
-                text_color="#4CAF50"
-            ).pack(side=tk.LEFT, padx=(0, 10))
-
-        if self.node.vpn_client_enabled or self.node.vpn_server_enabled:
-            vpn_text = "🔒 VPN клиент" if self.node.vpn_client_enabled else "🔒 VPN сервер" if self.node.vpn_server_enabled else ""
-            if vpn_text:
+            if self.node.firewall_enabled:
                 ctk.CTkLabel(
                     status_frame,
-                    text=vpn_text,
+                    text="🛡️ Файервол включён",
                     font=("Segoe UI", 11),
-                    text_color="#FF9800"
-                ).pack(side=tk.LEFT)
+                    text_color="#4CAF50"
+                ).pack(side=tk.LEFT, padx=(0, 10))
+
+            if self.node.vpn_client_enabled or self.node.vpn_server_enabled:
+                vpn_text = "🔒 VPN клиент" if self.node.vpn_client_enabled else "🔒 VPN сервер" if self.node.vpn_server_enabled else ""
+                if vpn_text:
+                    ctk.CTkLabel(
+                        status_frame,
+                        text=vpn_text,
+                        font=("Segoe UI", 11),
+                        text_color="#FF9800"
+                    ).pack(side=tk.LEFT)
 
         separator = ctk.CTkFrame(self.dialog, height=2, fg_color="#1E88E5")
-        separator.pack(fill=tk.X, padx=25, pady=(10, 15))
+        separator.pack(fill=tk.X, padx=25, pady=(5, 10))
 
         main_scroll_frame = ctk.CTkScrollableFrame(self.dialog, fg_color="transparent")
-        main_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=(0, 15))
+        main_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=(0, 10))
 
         components = self._get_all_components()
 
@@ -1175,7 +1182,7 @@ class ViewOnlyPropertiesDialog:
                 card_bg = "#F8F9FA"
 
             category_card = ctk.CTkFrame(main_scroll_frame, fg_color=card_bg, corner_radius=12)
-            category_card.pack(fill=tk.X, pady=(0, 20))
+            category_card.pack(fill=tk.X, pady=(0, 12))
 
             header_frame_cat = ctk.CTkFrame(category_card, fg_color="transparent")
             header_frame_cat.pack(fill=tk.X, padx=20, pady=(15, 10))

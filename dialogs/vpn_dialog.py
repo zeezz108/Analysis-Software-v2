@@ -31,43 +31,61 @@ class VPNConfigDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
         # Загружаем существующие настройки
         self.load_existing_settings()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
         """Создаёт основной интерфейс диалога."""
-        main_frame = ctk.CTkFrame(self.dialog)
+        # Единый цвет фона для всех секций
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        self.dialog.configure(fg_color=section_bg)
+
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Заголовок
         ctk.CTkLabel(
             main_frame,
-            text=f"🔒 Настройка VPN на {self.node.name}",
+            text=f"Настройка VPN на {self.node.name}",
             font=("Arial", 18, "bold")
         ).pack(pady=(0, 20))
 
         # ===== БЛОК КЛИЕНТА =====
-        client_frame = ctk.CTkFrame(main_frame)
-        client_frame.pack(fill=tk.X, pady=(0, 20))
+        client_frame = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+                                     border_color="#42A5F5", corner_radius=8)
+        client_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Цветная полоска-заголовок
+        client_accent = ctk.CTkFrame(client_frame, fg_color="#42A5F5", height=3, corner_radius=0)
+        client_accent.pack(fill=tk.X)
 
         client_header = ctk.CTkFrame(client_frame, fg_color="transparent")
-        client_header.pack(fill=tk.X, padx=10, pady=(10, 10))
+        client_header.pack(fill=tk.X, padx=15, pady=(10, 10))
 
         ctk.CTkLabel(
             client_header,
             text="VPN-Клиент",
-            font=("Arial", 16, "bold")
+            font=("Arial", 16, "bold"),
+            text_color="#1565C0"
         ).pack(side=tk.LEFT)
 
         self.client_enabled_var = tk.BooleanVar(value=self.node.vpn_client_enabled)
@@ -81,22 +99,28 @@ class VPNConfigDialog:
         self.client_switch.pack(side=tk.RIGHT)
 
         # Контейнер для настроек клиента
-        self.client_settings = ctk.CTkFrame(client_frame)
-        self.client_settings.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.client_settings = ctk.CTkFrame(client_frame, fg_color="transparent")
+        self.client_settings.pack(fill=tk.X, padx=15, pady=(0, 10))
 
         self.create_client_settings(self.client_settings)
 
         # ===== БЛОК СЕРВЕРА =====
-        server_frame = ctk.CTkFrame(main_frame)
-        server_frame.pack(fill=tk.X, pady=(0, 20))
+        server_frame = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+                                     border_color="#66BB6A", corner_radius=8)
+        server_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Цветная полоска-заголовок
+        server_accent = ctk.CTkFrame(server_frame, fg_color="#66BB6A", height=3, corner_radius=0)
+        server_accent.pack(fill=tk.X)
 
         server_header = ctk.CTkFrame(server_frame, fg_color="transparent")
-        server_header.pack(fill=tk.X, padx=10, pady=(10, 10))
+        server_header.pack(fill=tk.X, padx=15, pady=(10, 10))
 
         ctk.CTkLabel(
             server_header,
             text="VPN-Сервер",
-            font=("Arial", 16, "bold")
+            font=("Arial", 16, "bold"),
+            text_color="#2E7D32"
         ).pack(side=tk.LEFT)
 
         self.server_enabled_var = tk.BooleanVar(value=self.node.vpn_server_enabled)
@@ -110,8 +134,8 @@ class VPNConfigDialog:
         self.server_switch.pack(side=tk.RIGHT)
 
         # Контейнер для настроек сервера
-        self.server_settings = ctk.CTkFrame(server_frame)
-        self.server_settings.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.server_settings = ctk.CTkFrame(server_frame, fg_color="transparent")
+        self.server_settings.pack(fill=tk.X, padx=15, pady=(0, 10))
 
         self.create_server_settings(self.server_settings)
 
@@ -138,7 +162,7 @@ class VPNConfigDialog:
     def create_client_settings(self, parent):
         """Создаёт настройки для VPN-клиента."""
         # VPN IP сервера (куда подключаемся)
-        server_ip_frame = ctk.CTkFrame(parent)
+        server_ip_frame = ctk.CTkFrame(parent, fg_color="transparent")
         server_ip_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -153,7 +177,7 @@ class VPNConfigDialog:
         self.client_server_ip.pack(anchor=tk.W, pady=5)
 
         # Порт сервера
-        port_frame = ctk.CTkFrame(parent)
+        port_frame = ctk.CTkFrame(parent, fg_color="transparent")
         port_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -171,7 +195,7 @@ class VPNConfigDialog:
         self.client_port.pack(side=tk.LEFT)
 
         # VPN IP самого узла (клиента)
-        client_ip_frame = ctk.CTkFrame(parent)
+        client_ip_frame = ctk.CTkFrame(parent, fg_color="transparent")
         client_ip_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -196,7 +220,7 @@ class VPNConfigDialog:
         self.client_virtual_mask.pack(side=tk.LEFT)
 
         # Статус подключения
-        status_frame = ctk.CTkFrame(parent)
+        status_frame = ctk.CTkFrame(parent, fg_color="transparent")
         status_frame.pack(fill=tk.X, pady=(0, 5))
 
         ctk.CTkLabel(
@@ -225,7 +249,7 @@ class VPNConfigDialog:
     def create_server_settings(self, parent):
         """Создаёт настройки для VPN-сервера."""
         # VPN IP сервера
-        server_ip_frame = ctk.CTkFrame(parent)
+        server_ip_frame = ctk.CTkFrame(parent, fg_color="transparent")
         server_ip_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -250,7 +274,7 @@ class VPNConfigDialog:
         self.server_virtual_mask.pack(side=tk.LEFT)
 
         # Порт сервера
-        port_frame = ctk.CTkFrame(parent)
+        port_frame = ctk.CTkFrame(parent, fg_color="transparent")
         port_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(
@@ -265,7 +289,7 @@ class VPNConfigDialog:
         self.server_port.pack(anchor=tk.W, pady=5)
 
         # Внутренняя сеть
-        network_frame = ctk.CTkFrame(parent)
+        network_frame = ctk.CTkFrame(parent, fg_color="transparent")
         network_frame.pack(fill=tk.X, pady=(0, 5))
 
         ctk.CTkLabel(

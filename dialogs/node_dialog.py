@@ -42,13 +42,21 @@ class NodeTypeSelectionDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -92,7 +100,7 @@ class NodeTypeSelectionDialog:
             rb.pack(anchor=tk.W, pady=5, padx=30)
 
         # Фрейм для кнопок
-        button_frame = ctk.CTkFrame(self.dialog)
+        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         button_frame.pack(fill=tk.X, pady=(25, 20), padx=20)
 
         ctk.CTkButton(
@@ -167,8 +175,6 @@ class NodeCreationDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
-
         # Загружаем данные существующего узла
         if self.is_edit_mode:
             self.load_existing_node_data()
@@ -183,8 +189,16 @@ class NodeCreationDialog:
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -501,7 +515,7 @@ class NodeCreationDialog:
         self.update_tabs()
 
         # Кнопки
-        button_frame = ctk.CTkFrame(self.dialog)
+        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         button_frame.pack(fill=tk.X, padx=15, pady=(10, 15))
 
         ctk.CTkButton(
@@ -514,6 +528,8 @@ class NodeCreationDialog:
             button_frame, text="Отмена", command=self.dialog.destroy,
             fg_color="#CD3333", font=("Arial", 13), width=100, height=38
         ).pack(side=tk.RIGHT, padx=5)
+
+        self.center_window()
 
     def update_zone_frame(self):
         """Обновляет фрейм выбора зоны."""
@@ -603,9 +619,11 @@ class NodeCreationDialog:
             per_frame = self.notebook.tab("Периферия")
             self.create_peripheral_tabs(per_frame, current_config["peripheral_tabs"])
 
-        self.notebook.add("Сеть")
-        net_frame = self.notebook.tab("Сеть")
-        self.create_network_tab(net_frame, current_config)
+        # Вкладка "Сеть" — не показываем для узла Интернет
+        if current_node_type != "Internet":
+            self.notebook.add("Сеть")
+            net_frame = self.notebook.tab("Сеть")
+            self.create_network_tab(net_frame, current_config)
 
     def create_default_ports(self):
         """Создаёт порты по умолчанию для текущего типа узла."""
@@ -1385,12 +1403,20 @@ class NodeCreationDialog:
                     if value:
                         if "processor" in attr_name or "cpu" in attr_name:
                             hardware_items.append(f"Процессор: {value}")
-                        elif "gpu" in attr_name:
+                        elif "gpu" in attr_name and "driver" not in attr_name:
                             hardware_items.append(f"Видеоконтроллер: {value}")
                         elif "motherboard" in attr_name:
                             hardware_items.append(f"Материнская плата: {value}")
                         elif "hdd" in attr_name or "storage" in attr_name:
                             hardware_items.append(f"HDD/SSD: {value}")
+                        elif "mouse" in attr_name:
+                            software_items.append(f"Мышь: {value}")
+                        elif "keyboard" in attr_name:
+                            software_items.append(f"Клавиатура: {value}")
+                        elif "printer" in attr_name:
+                            software_items.append(f"Принтер: {value}")
+                        elif "monitor" in attr_name:
+                            software_items.append(f"Монитор: {value}")
                         elif "os" in attr_name:
                             software_items.append(f"ОС: {value}")
                         elif "app" in attr_name:

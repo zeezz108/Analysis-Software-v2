@@ -204,7 +204,7 @@ class Link:
 
     def get_bezier_coords(self, canvas_view, link_index: int = 0, total_links_on_side: int = 1) -> List[float]:
         """
-        Рассчитывает координаты для отрисовки ортогональной линии со стрелкой.
+        Рассчитывает координаты для отрисовки ортогональной линии с обходом препятствий.
 
         Args:
             canvas_view: Экземпляр CanvasView (нужен для получения границ иконок)
@@ -212,7 +212,8 @@ class Link:
             total_links_on_side: Общее количество линий, выходящих с той же стороны
 
         Returns:
-            Список координат: [x1,y1, x2,y2, ..., arrow_x1,arrow_y1, arrow_x2,arrow_y2, end_x,end_y]
+            Список координат: [x1,y1, x2,y2, ..., dummy*6]
+            (последние 6 значений — заглушка для обратной совместимости)
         """
         # Получаем границы иконок узлов
         a_bounds = canvas_view.get_icon_bounds(self.a)
@@ -298,27 +299,125 @@ class Link:
         points.append(b_end)
         points.append(b_point)
 
+        # Обход препятствий: проверяем, пересекает ли путь иконки других узлов
+        # Только для серединных сегментов (не от/к иконкам A и B)
+        obstacle_bounds = []
+        margin = 3  # минимальный отступ от иконки
+        if hasattr(canvas_view, 'board') and len(points) > 4:
+            for node in canvas_view.board.nodes:
+                if node.id == self.a.id or node.id == self.b.id:
+                    continue
+                nb = canvas_view.get_icon_bounds(node)
+                obstacle_bounds.append((
+                    nb[0] - margin, nb[1] - margin,
+                    nb[0] + nb[2] + margin, nb[1] + nb[3] + margin
+                ))
+
+        if obstacle_bounds:
+            # Проверяем только серединные сегменты (2..len-3), не трогаем выход/вход
+            mid_start = 2
+            mid_end = len(points) - 2
+            needs_avoidance = False
+            for i in range(mid_start, mid_end):
+                if i < len(points) - 1:
+                    for obs in obstacle_bounds:
+                        if self._segment_intersects_rect(points[i], points[i + 1], obs):
+                            needs_avoidance = True
+                            break
+                if needs_avoidance:
+                    break
+            if needs_avoidance:
+                points = self._avoid_obstacles(points, obstacle_bounds)
+
         # Плоский список координат
         flat_points = []
         for point in points:
             flat_points.extend([point[0], point[1]])
 
-        # Стрелка на конце (у b_point)
-        arrow_size = 8
-        arrow_dir_x = -b_dir[0]
-        arrow_dir_y = -b_dir[1]
-        perp_x = -arrow_dir_y
-        perp_y = arrow_dir_x
+        # Заглушка для обратной совместимости (6 значений)
+        last = points[-1] if points else (0, 0)
+        flat_points += [last[0], last[1], last[0], last[1], last[0], last[1]]
 
-        arrow_base_x = b_point[0] + b_dir[0] * arrow_size
-        arrow_base_y = b_point[1] + b_dir[1] * arrow_size
+        return flat_points
 
-        arrow_x1 = arrow_base_x + perp_x * arrow_size * 0.5
-        arrow_y1 = arrow_base_y + perp_y * arrow_size * 0.5
-        arrow_x2 = arrow_base_x - perp_x * arrow_size * 0.5
-        arrow_y2 = arrow_base_y - perp_y * arrow_size * 0.5
+    @staticmethod
+    def _segment_intersects_rect(p1: Tuple[float, float], p2: Tuple[float, float],
+                                  rect: Tuple[float, float, float, float]) -> bool:
+        """Проверяет, пересекает ли отрезок (p1->p2) прямоугольник (x1,y1,x2,y2)."""
+        rx1, ry1, rx2, ry2 = rect
+        x1, y1 = p1
+        x2, y2 = p2
 
-        return flat_points + [arrow_x1, arrow_y1, arrow_x2, arrow_y2, b_point[0], b_point[1]]
+        # Проверяем горизонтальный отрезок
+        if y1 == y2:
+            if ry1 <= y1 <= ry2:
+                seg_min_x = min(x1, x2)
+                seg_max_x = max(x1, x2)
+                if seg_min_x < rx2 and seg_max_x > rx1:
+                    return True
+            return False
+
+        # Проверяем вертикальный отрезок
+        if x1 == x2:
+            if rx1 <= x1 <= rx2:
+                seg_min_y = min(y1, y2)
+                seg_max_y = max(y1, y2)
+                if seg_min_y < ry2 and seg_max_y > ry1:
+                    return True
+            return False
+
+        return False
+
+    def _avoid_obstacles(self, points: List[Tuple[float, float]],
+                          obstacles: List[Tuple[float, float, float, float]]) -> List[Tuple[float, float]]:
+        """Корректирует серединные сегменты пути, чтобы обойти иконки узлов.
+
+        Сдвигает среднюю линию выше/ниже/левее/правее если она проходит через иконку.
+        Не добавляет лишних точек — только сдвигает существующие.
+        """
+        result = list(points)
+
+        # Проверяем каждый сегмент (кроме первых двух и последних двух — выход/вход)
+        for i in range(2, len(result) - 2):
+            if i >= len(result) - 1:
+                break
+            p1 = result[i]
+            p2 = result[i + 1]
+
+            for obs in obstacles:
+                if not self._segment_intersects_rect(p1, p2, obs):
+                    continue
+
+                rx1, ry1, rx2, ry2 = obs
+
+                if p1[1] == p2[1]:
+                    # Горизонтальный сегмент — сдвигаем по Y
+                    dist_top = abs(p1[1] - ry1)
+                    dist_bottom = abs(p1[1] - ry2)
+                    if dist_top <= dist_bottom:
+                        new_y = ry1 - 5
+                    else:
+                        new_y = ry2 + 5
+                    result[i] = (p1[0], new_y)
+                    result[i + 1] = (p2[0], new_y)
+                    # Обновляем соседние вертикальные сегменты
+                    if i > 0:
+                        result[i - 1] = (result[i - 1][0], result[i - 1][1])  # не меняем
+                    break
+
+                elif p1[0] == p2[0]:
+                    # Вертикальный сегмент — сдвигаем по X
+                    dist_left = abs(p1[0] - rx1)
+                    dist_right = abs(p1[0] - rx2)
+                    if dist_left <= dist_right:
+                        new_x = rx1 - 5
+                    else:
+                        new_x = rx2 + 5
+                    result[i] = (new_x, p1[1])
+                    result[i + 1] = (new_x, p2[1])
+                    break
+
+        return result
 
     def get_port_names(self) -> Tuple[str, str]:
         """

@@ -163,6 +163,49 @@ class CanvasView:
 
         ctk.CTkButton(dialog, text="Применить", command=apply, width=120).pack(pady=10)
 
+    def show_scale_settings(self):
+        """Показывает окно выбора масштаба интерфейса."""
+        from utils.scaling import SCALE_OPTIONS, load_user_scale, save_user_scale, apply_scaling
+
+        dialog = ctk.CTkToplevel(self.root)
+        dialog.title("Масштаб интерфейса")
+        dialog.geometry("350x250")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.grab_set()
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() - 350) // 2
+        y = (dialog.winfo_screenheight() - 250) // 2
+        dialog.geometry(f"350x250+{x}+{y}")
+
+        ctk.CTkLabel(dialog, text="Масштаб интерфейса", font=("Arial", 16, "bold")).pack(pady=(15, 5))
+        ctk.CTkLabel(dialog, text="Выберите масштаб отображения элементов",
+                     font=("Arial", 11), text_color="gray").pack(pady=(0, 10))
+
+        current_scale = load_user_scale()
+        scale_var = tk.StringVar(value=current_scale)
+
+        options = list(SCALE_OPTIONS.keys())
+        combo = ctk.CTkComboBox(dialog, values=options, variable=scale_var,
+                                width=200, state="readonly")
+        combo.pack(pady=10)
+
+        info_label = ctk.CTkLabel(dialog, text="Изменение вступит в силу после перезапуска",
+                                  font=("Arial", 10), text_color="gray")
+        info_label.pack(pady=(0, 10))
+
+        def apply_scale():
+            chosen = scale_var.get()
+            save_user_scale(chosen)
+            apply_scaling(chosen)
+            info_label.configure(text="Масштаб применён. Перезапустите для полного эффекта.",
+                                text_color="#4CAF50")
+
+        ctk.CTkButton(dialog, text="Применить", command=apply_scale, width=120).pack(pady=5)
+        ctk.CTkButton(dialog, text="Закрыть", command=dialog.destroy,
+                      width=100, fg_color="gray").pack(pady=5)
+
     def get_icon_bounds(self, node: Node):
         """Возвращает границы иконки узла для отрисовки соединений."""
         cache_key = f"{node.id}_{node.size[0]}_{node.size[1]}"
@@ -265,6 +308,9 @@ class CanvasView:
 
         self.btn_grid = ctk.CTkButton(control_frame, text="Настройки сетки", command=self.show_grid_settings)
         self.btn_grid.pack(fill=tk.X, pady=2)
+
+        self.btn_scale = ctk.CTkButton(control_frame, text="Масштаб интерфейса", command=self.show_scale_settings)
+        self.btn_scale.pack(fill=tk.X, pady=2)
 
         # Правая область - холст
         canvas_frame = ttk.Frame(self.root)
@@ -799,6 +845,31 @@ class CanvasView:
             new_x = self.snap_to_grid(x - self.drag_offset[0])
             new_y = self.snap_to_grid(y - self.drag_offset[1])
             zone = self.drag_node.zone
+
+            # Узел "Интернет" не должен пересекать границы TIM-зон
+            if self.drag_node.type == "Internet":
+                node_w, node_h = self.drag_node.size
+                for z in self.board.zones:
+                    if z.zone_type == "tim":
+                        # Проверяем пересечение
+                        if (new_x < z.x + z.width and new_x + node_w > z.x and
+                                new_y < z.y + z.height and new_y + node_h > z.y):
+                            # Выталкиваем узел за границу зоны
+                            cx_node = new_x + node_w / 2
+                            cy_node = new_y + node_h / 2
+                            cx_zone = z.x + z.width / 2
+                            cy_zone = z.y + z.height / 2
+                            if abs(cx_node - cx_zone) > abs(cy_node - cy_zone):
+                                if cx_node > cx_zone:
+                                    new_x = z.x + z.width + 5
+                                else:
+                                    new_x = z.x - node_w - 5
+                            else:
+                                if cy_node > cy_zone:
+                                    new_y = z.y + z.height + 5
+                                else:
+                                    new_y = z.y - node_h - 5
+
             if zone:
                 new_x = max(zone.x, min(new_x, zone.x + zone.width - self.drag_node.size[0]))
                 new_y = max(zone.y, min(new_y, zone.y + zone.height - self.drag_node.size[1]))
@@ -1282,19 +1353,15 @@ class CanvasView:
 
                 points_data = l.get_bezier_coords(self, link_idx, total)
                 all_points = points_data[:-6]
-                arrow_points = points_data[-6:]
                 line_points = [(all_points[i], all_points[i + 1]) for i in range(0, len(all_points), 2)]
-                arrow_x1, arrow_y1, arrow_x2, arrow_y2, end_x, end_y = arrow_points
 
-                # Единый стиль для всех соединений
+                # Единый стиль для всех соединений (без стрелок — трафик двунаправленный)
                 line_color = "#4CAF50"
                 line_width = 2
 
                 for i in range(len(line_points) - 1):
                     self.canvas.create_line(line_points[i][0], line_points[i][1], line_points[i + 1][0],
                                             line_points[i + 1][1], fill=line_color, width=line_width)
-                self.canvas.create_polygon(end_x, end_y, arrow_x1, arrow_y1, arrow_x2, arrow_y2, fill=line_color,
-                                           outline=line_color)
             except Exception as e:
                 print(f"Ошибка отрисовки соединения: {e}")
 

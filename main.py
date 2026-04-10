@@ -128,6 +128,10 @@ def main():
     ctk.set_appearance_mode("light")
     ctk.set_default_color_theme("dark-blue")
 
+    # Применяем пользовательский масштаб (если ранее сохранён)
+    from utils.scaling import apply_scaling
+    apply_scaling()
+
     # Создаем главное окно (скрытое до завершения загрузки)
     root = ctk.CTk()
     root.title("Редактор топологии сети")

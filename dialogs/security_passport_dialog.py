@@ -42,14 +42,21 @@ class SecurityPassportDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.show_loading_screen()
         self.dialog.after(100, self.load_security_data_async)
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -124,50 +131,19 @@ class SecurityPassportDialog:
             "has_pon": False
         }
 
-        # Ключевые слова для аппаратных компонентов (не периферия)
-        hardware_keywords = [
-            "процессор", "cpu", "видеокарта", "видеоконтроллер", "gpu",
-            "материнская плата", "motherboard", "mainboard",
-            "hdd", "ssd", "жёсткий диск", "жесткий диск", "накопитель",
-            "память", "ram", "оперативная память", "dimm"
-        ]
-
-        # Список ключевых слов для периферии (мыши, клавиатуры, принтеры, мониторы)
-        peripheral_keywords = [
-            "мышь", "mouse", "клавиатур", "keyboard", "key pad",
-            "принтер", "printer", "мфу", "monitor", "монитор",
-            "display", "экран", "дисплей", "lcd", "led",
-            "A4Tech", "Logitech", "Razer", "Corsair", "HyperX",
-            "Bloody", "Genius", "Defender", "SteelSeries", "Zowie",
-            "HP", "Canon", "Epson", "Xerox", "Brother", "Samsung",
-            "Dell", "LG", "ViewSonic", "Asus", "Acer", "BenQ"
-        ]
-
-        def is_hardware(text: str) -> bool:
-            """Проверяет, является ли компонент аппаратным (не периферией)."""
-            text_lower = text.lower()
-            return any(keyword in text_lower for keyword in hardware_keywords)
-
-        def is_peripheral(text: str) -> bool:
-            """Проверяет, является ли компонент периферией."""
-            text_lower = text.lower()
-            return any(keyword.lower() in text_lower for keyword in peripheral_keywords)
+        # Префиксы для классификации
+        peripheral_prefixes = ("Мышь:", "Клавиатура:", "Принтер:", "Монитор:")
 
         # Аппаратные компоненты
         for item in self.node.properties.get("hardware", []):
             if item and item.strip():
-                if is_hardware(item):
-                    components["hardware"].append(item)
-                elif is_peripheral(item):
-                    components["peripherals"].append(item)
-                else:
-                    components["hardware"].append(item)
+                components["hardware"].append(item)
 
-        # Программные компоненты (исключаем периферию)
+        # Программные компоненты — классификация по префиксам
         for item in self.node.properties.get("software", []):
             if item and item.strip():
                 item_lower = item.lower()
-                if is_peripheral(item):
+                if item.startswith(peripheral_prefixes):
                     components["peripherals"].append(item)
                 elif "драйвер" in item_lower or "driver" in item_lower:
                     components["drivers"].append(item)
@@ -626,6 +602,8 @@ class SecurityPassportDialog:
 
         ctk.CTkButton(right_buttons, text="✕ Закрыть", command=self.dialog.destroy, width=110, height=38,
                       fg_color="#F44336").pack(side=tk.RIGHT, padx=5)
+
+        self.center_window()
 
     def create_vulnerabilities_table(self, parent):
         """Создаёт таблицу с уязвимостями."""

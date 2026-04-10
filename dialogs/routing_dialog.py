@@ -33,13 +33,21 @@ class RouteEditDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
@@ -53,80 +61,72 @@ class RouteEditDialog:
         return interfaces if interfaces else ["eth0"]
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=25)
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        self.dialog.configure(fg_color=section_bg)
+
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
         # Заголовок
         ctk.CTkLabel(
             main_frame, text="Параметры маршрута",
             font=("Arial", 18, "bold")
-        ).pack(pady=(0, 20))
+        ).pack(pady=(0, 15))
 
-        # Сеть назначения
-        ctk.CTkLabel(main_frame, text="🌐 Сеть назначения:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X,
-                                                                                                          pady=(5, 0))
+        # Секция: Назначение
+        dest_section = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+                                     border_color="#CCCCCC", corner_radius=8)
+        dest_section.pack(fill=tk.X, pady=(0, 10))
+        dest_inner = ctk.CTkFrame(dest_section, fg_color="transparent")
+        dest_inner.pack(fill=tk.X, padx=15, pady=10)
+
+        ctk.CTkLabel(dest_inner, text="Сеть назначения:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X)
         self.dest_var = tk.StringVar(value=self.route.destination if self.route else "")
-        ctk.CTkEntry(main_frame, textvariable=self.dest_var, placeholder_text="например: 192.168.1.0", height=35).pack(
-            fill=tk.X, pady=(0, 10))
+        ctk.CTkEntry(dest_inner, textvariable=self.dest_var, placeholder_text="например: 192.168.1.0", height=35).pack(
+            fill=tk.X, pady=(5, 5))
 
-        # Маска сети
-        ctk.CTkLabel(main_frame, text="🔢 Маска сети:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X,
-                                                                                                     pady=(5, 0))
-        mask_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        mask_frame.pack(fill=tk.X, pady=(0, 10))
-
+        ctk.CTkLabel(dest_inner, text="Маска сети:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
+        mask_frame = ctk.CTkFrame(dest_inner, fg_color="transparent")
+        mask_frame.pack(fill=tk.X, pady=(5, 0))
         self.mask_var = tk.StringVar(value=self.route.netmask if self.route else "")
         self.mask_entry = ctk.CTkEntry(mask_frame, textvariable=self.mask_var, placeholder_text="255.255.255.0 или 24",
                                        width=200, height=35)
         self.mask_entry.pack(side=tk.LEFT)
+        ctk.CTkLabel(mask_frame, text="десятичная или CIDR", font=("Arial", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
 
-        ctk.CTkLabel(mask_frame, text="(десятичная или CIDR)", font=("Arial", 10), text_color="gray").pack(side=tk.LEFT,
-                                                                                                           padx=(10, 0))
+        # Секция: Маршрутизация
+        route_section = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+                                      border_color="#CCCCCC", corner_radius=8)
+        route_section.pack(fill=tk.X, pady=(0, 10))
+        route_inner = ctk.CTkFrame(route_section, fg_color="transparent")
+        route_inner.pack(fill=tk.X, padx=15, pady=10)
 
-        # Шлюз
-        ctk.CTkLabel(main_frame, text="🚪 Шлюз (Gateway):", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X,
-                                                                                                         pady=(5, 0))
-        gw_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        gw_frame.pack(fill=tk.X, pady=(0, 10))
-
+        ctk.CTkLabel(route_inner, text="Шлюз (Gateway):", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X)
+        gw_frame = ctk.CTkFrame(route_inner, fg_color="transparent")
+        gw_frame.pack(fill=tk.X, pady=(5, 5))
         self.gw_var = tk.StringVar(value=self.route.gateway if self.route else "")
-        self.gw_entry = ctk.CTkEntry(gw_frame, textvariable=self.gw_var, placeholder_text="192.168.1.1", width=200,
-                                     height=35)
+        self.gw_entry = ctk.CTkEntry(gw_frame, textvariable=self.gw_var, placeholder_text="192.168.1.1", width=200, height=35)
         self.gw_entry.pack(side=tk.LEFT)
+        ctk.CTkLabel(gw_frame, text="0.0.0.0 для прямого подключения", font=("Arial", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
 
-        ctk.CTkLabel(gw_frame, text="(0.0.0.0 для прямого подключения)", font=("Arial", 10), text_color="gray").pack(
-            side=tk.LEFT, padx=(10, 0))
-
-        # Интерфейс
-        ctk.CTkLabel(main_frame, text="🔌 Интерфейс:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X,
-                                                                                                    pady=(5, 0))
+        ctk.CTkLabel(route_inner, text="Интерфейс:", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
         interfaces = self.get_available_interfaces()
-
         default_iface = self.route.interface if self.route and self.route.interface in interfaces else (
             interfaces[0] if interfaces else "")
         self.iface_var = tk.StringVar(value=default_iface)
-        self.iface_combo = ctk.CTkComboBox(main_frame, values=interfaces, variable=self.iface_var, height=35)
-        self.iface_combo.pack(fill=tk.X, pady=(0, 10))
+        self.iface_combo = ctk.CTkComboBox(route_inner, values=interfaces, variable=self.iface_var, height=35)
+        self.iface_combo.pack(fill=tk.X, pady=(5, 5))
 
-        # Метрика
-        ctk.CTkLabel(main_frame, text="📊 Метрика (приоритет):", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X,
-                                                                                                              pady=(5,
-                                                                                                                    0))
-        metric_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        metric_frame.pack(fill=tk.X, pady=(0, 20))
-
+        ctk.CTkLabel(route_inner, text="Метрика (приоритет):", anchor=tk.W, font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
+        metric_frame = ctk.CTkFrame(route_inner, fg_color="transparent")
+        metric_frame.pack(fill=tk.X, pady=(5, 0))
         self.metric_var = tk.IntVar(value=self.route.metric if self.route else 10)
-
         ctk.CTkButton(metric_frame, text="-", width=40, height=35,
                       command=lambda: self.metric_var.set(max(1, self.metric_var.get() - 1))).pack(side=tk.LEFT, padx=2)
-        ctk.CTkEntry(metric_frame, textvariable=self.metric_var, width=80, justify="center", height=35).pack(
-            side=tk.LEFT, padx=2)
+        ctk.CTkEntry(metric_frame, textvariable=self.metric_var, width=80, justify="center", height=35).pack(side=tk.LEFT, padx=2)
         ctk.CTkButton(metric_frame, text="+", width=40, height=35,
-                      command=lambda: self.metric_var.set(min(999, self.metric_var.get() + 1))).pack(side=tk.LEFT,
-                                                                                                     padx=2)
-
-        ctk.CTkLabel(metric_frame, text="(меньше = выше приоритет)", font=("Arial", 10), text_color="gray").pack(
-            side=tk.LEFT, padx=(10, 0))
+                      command=lambda: self.metric_var.set(min(999, self.metric_var.get() + 1))).pack(side=tk.LEFT, padx=2)
+        ctk.CTkLabel(metric_frame, text="меньше = выше приоритет", font=("Arial", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
 
         # Кнопки
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -189,20 +189,28 @@ class RoutingTableDialog:
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
-        self.center_window()
         self.create_widgets()
+        self.center_window()
         self.refresh_table()
 
     def center_window(self):
         self.dialog.update_idletasks()
-        width = self.dialog.winfo_width()
-        height = self.dialog.winfo_height()
+        # Get the geometry size that was set
+        geo = self.dialog.geometry()
+        # Parse "WxH+X+Y" or "WxH"
+        size_part = geo.split('+')[0]
+        if 'x' in size_part:
+            width = int(size_part.split('x')[0])
+            height = int(size_part.split('x')[1])
+        else:
+            width = self.dialog.winfo_reqwidth()
+            height = self.dialog.winfo_reqheight()
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        main_frame = ctk.CTkFrame(self.dialog)
+        main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
 
         # Заголовок
@@ -214,7 +222,7 @@ class RoutingTableDialog:
             side=tk.LEFT, padx=(15, 0))
 
         # Панель инструментов
-        toolbar = ctk.CTkFrame(main_frame)
+        toolbar = ctk.CTkFrame(main_frame, fg_color="transparent")
         toolbar.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkButton(toolbar, text="➕ Добавить", command=self.add_route, width=100, height=32).pack(side=tk.LEFT,
@@ -239,7 +247,7 @@ class RoutingTableDialog:
                       fg_color="#4CAF50").pack(side=tk.RIGHT)
 
         # Таблица
-        table_frame = ctk.CTkFrame(main_frame)
+        table_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         table_frame.pack(fill=tk.BOTH, expand=True)
 
         columns = ("Сеть назначения", "Маска", "Шлюз", "Интерфейс", "Метрика")
