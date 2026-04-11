@@ -5,6 +5,7 @@
 на основе базы данных CVE.
 """
 
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 import customtkinter as ctk
@@ -181,12 +182,34 @@ class SecurityPassportDialog:
         return components
 
     def get_all_cves_for_component(self, component_name: str) -> List[Dict]:
-        """Возвращает все CVE для компонента."""
-        try:
-            if not component_name or component_name == "—":
-                return []
+        """Возвращает все CVE для компонента (с кешированием в properties узла).
 
-            all_cves = []
+        При первом обращении результат сохраняется в
+        `node.properties["security_passport_cache"]["components"][component_name]`.
+        Последующие открытия паспорта читают готовые данные из кеша.
+        Если компонент отсутствует в узле — его запись вычищается из кеша.
+        """
+        if not component_name or component_name == "—":
+            return []
+
+        # Готовим двухуровневый кеш: {"components": {name: [cves]}}
+        cache_root = self.node.properties.setdefault(
+            "security_passport_cache", {"components": {}, "version": 1}
+        )
+        comp_cache = cache_root.setdefault("components", {})
+        # Фиксируем все ключи, которые мы реально использовали в этой сессии —
+        # по завершении сборки паспорта вычистим устаревшие.
+        if not hasattr(self, "_cache_used_keys"):
+            self._cache_used_keys = set()
+        self._cache_used_keys.add(component_name)
+
+        if component_name in comp_cache:
+            cached = comp_cache.get(component_name)
+            if isinstance(cached, list):
+                return cached
+
+        try:
+            all_cves: List[Dict] = []
             cpe_info = extract_cpe_components(component_name)
 
             if cpe_info.get('vendor'):
@@ -214,10 +237,24 @@ class SecurityPassportDialog:
                     seen_cves.add(cve_id)
                     unique_cves.append(cve)
 
+            comp_cache[component_name] = unique_cves
             return unique_cves
         except Exception as e:
             print(f"Ошибка поиска CVE для {component_name}: {e}")
             return []
+
+    def _prune_cache(self) -> None:
+        """Удаляет из кеша записи, компоненты которых исчезли из конфигурации."""
+        cache_root = self.node.properties.get("security_passport_cache")
+        if not isinstance(cache_root, dict):
+            return
+        comp_cache = cache_root.get("components")
+        if not isinstance(comp_cache, dict):
+            return
+        used = getattr(self, "_cache_used_keys", set())
+        stale = [k for k in comp_cache.keys() if k not in used]
+        for k in stale:
+            comp_cache.pop(k, None)
 
     def build_dynamic_passport(self, components: Dict) -> List[Dict]:
         """Строит динамический паспорт безопасности."""
@@ -263,7 +300,7 @@ class SecurityPassportDialog:
                 })
 
                 if all_cves:
-                    for cve_data in all_cves[:5]:
+                    for cve_data in all_cves:
                         ports_items.append({
                             "is_header": False,
                             "cwe": cve_data.get('cwe_id', '--'),
@@ -292,7 +329,7 @@ class SecurityPassportDialog:
                     })
 
                     if all_cves:
-                        for cve_data in all_cves[:5]:
+                        for cve_data in all_cves:
                             ports_items.append({
                                 "is_header": False,
                                 "cwe": cve_data.get('cwe_id', 'CWE--787'),
@@ -347,7 +384,7 @@ class SecurityPassportDialog:
                 })
 
                 if all_cves:
-                    for cve_data in all_cves[:5]:
+                    for cve_data in all_cves:
                         hardware_items.append({
                             "is_header": False,
                             "cwe": cve_data.get('cwe_id', '--'),
@@ -389,7 +426,7 @@ class SecurityPassportDialog:
                 })
 
                 if all_cves:
-                    for cve_data in all_cves[:5]:
+                    for cve_data in all_cves:
                         app_items.append({
                             "is_header": False,
                             "cwe": cve_data.get('cwe_id', '--'),
@@ -459,7 +496,7 @@ class SecurityPassportDialog:
                 })
 
                 if all_cves:
-                    for cve_data in all_cves[:5]:
+                    for cve_data in all_cves:
                         peripheral_items.append({
                             "is_header": False,
                             "cwe": cve_data.get('cwe_id', '--'),
@@ -495,7 +532,11 @@ class SecurityPassportDialog:
                 self.dialog.after(0, lambda: self.progress.set(0.3))
                 self.dialog.after(0, lambda: self.status_label.configure(text="Поиск уязвимостей в базе CVE..."))
 
+                # Сбрасываем список «использованных» ключей для этого запуска
+                self._cache_used_keys = set()
                 passport_data = self.build_dynamic_passport(components)
+                # Вычищаем из кеша устаревшие компоненты (которых больше нет)
+                self._prune_cache()
 
                 total_vulnerabilities = 0
                 for section in passport_data:
@@ -594,6 +635,8 @@ class SecurityPassportDialog:
 
         ctk.CTkButton(left_buttons, text="📥 Экспорт в CSV", command=self.export_to_csv, width=130, height=38).pack(
             side=tk.LEFT, padx=5)
+        ctk.CTkButton(left_buttons, text="📄 Экспорт в PDF", command=self.export_to_pdf, width=130, height=38,
+                      fg_color="#8E44AD", hover_color="#7B3E96").pack(side=tk.LEFT, padx=5)
         ctk.CTkButton(left_buttons, text="🔄 Обновить", command=self.refresh_data, width=110, height=38).pack(
             side=tk.LEFT, padx=5)
 
@@ -704,8 +747,203 @@ class SecurityPassportDialog:
         else:
             messagebox.showwarning("Нет данных", "Нет данных для экспорта")
 
+    def export_to_pdf(self):
+        """Экспортирует паспорт безопасности в PDF (через reportlab).
+
+        Структура документа:
+        - Заголовок с названием узла и датой
+        - Сводка (тип узла, число уязвимостей)
+        - Таблица: повторяет табличное представление на экране,
+          включая строки-заголовки секций и компонентов.
+        - Поддержка кириллицы через шрифт DejaVuSans / Arial, который
+          регистрируется в pdfmetrics. Если системный шрифт не найден,
+          используется встроенный Helvetica (кириллица может не отрисоваться).
+        """
+        try:
+            from tkinter import filedialog
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import mm
+            from reportlab.platypus import (
+                SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+            )
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+        except ImportError:
+            messagebox.showerror(
+                "Нет библиотеки reportlab",
+                "Для экспорта в PDF требуется reportlab.\n"
+                "Установите: pip install reportlab"
+            )
+            return
+
+        # Собираем данные с отображаемой Treeview
+        rows = []
+        for item in self.tree.get_children():
+            values = self.tree.item(item)['values']
+            tags = self.tree.item(item).get('tags') or ()
+            rows.append((tags, [("" if v is None else str(v)) for v in values]))
+
+        # Убираем пустую заглушку "Нет данных"
+        rows = [r for r in rows if not (r[1][1] == "Нет данных")]
+
+        if not rows:
+            messagebox.showwarning("Нет данных", "Нет данных для экспорта в PDF.")
+            return
+
+        # Диалог выбора файла
+        default_name = f"Паспорт_безопасности_{self.node.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        filename = filedialog.asksaveasfilename(
+            parent=self.dialog,
+            title="Сохранить паспорт безопасности в PDF",
+            defaultextension=".pdf",
+            initialfile=default_name,
+            filetypes=[("PDF файлы", "*.pdf")]
+        )
+        if not filename:
+            return
+
+        # Регистрация шрифта с поддержкой кириллицы
+        font_name = "Helvetica"
+        font_bold = "Helvetica-Bold"
+        candidates = [
+            ("DejaVuSans", "DejaVuSans.ttf"),
+            ("DejaVuSans", "DejaVuSans-Bold.ttf"),
+            ("ArialTT", r"C:\Windows\Fonts\arial.ttf"),
+            ("ArialTT-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
+        ]
+        registered = {}
+        for name, path in candidates:
+            if os.path.exists(path) and name not in registered:
+                try:
+                    pdfmetrics.registerFont(TTFont(name, path))
+                    registered[name] = True
+                except Exception:
+                    pass
+
+        if "ArialTT" in registered:
+            font_name = "ArialTT"
+            font_bold = "ArialTT-Bold" if "ArialTT-Bold" in registered else "ArialTT"
+        elif "DejaVuSans" in registered:
+            font_name = "DejaVuSans"
+            font_bold = "DejaVuSans"
+
+        # Настраиваем документ (альбомный A4 — под широкую таблицу)
+        doc = SimpleDocTemplate(
+            filename,
+            pagesize=landscape(A4),
+            leftMargin=10 * mm,
+            rightMargin=10 * mm,
+            topMargin=12 * mm,
+            bottomMargin=12 * mm,
+        )
+
+        styles = getSampleStyleSheet()
+        title_style = ParagraphStyle(
+            "TitleRu", parent=styles["Heading1"],
+            fontName=font_bold, fontSize=18, leading=22,
+            textColor=colors.HexColor("#1565C0"),
+        )
+        subtitle_style = ParagraphStyle(
+            "SubRu", parent=styles["Normal"],
+            fontName=font_name, fontSize=11, leading=14,
+            textColor=colors.HexColor("#555555"),
+        )
+        body_style = ParagraphStyle(
+            "BodyRu", parent=styles["Normal"],
+            fontName=font_name, fontSize=9, leading=11,
+        )
+
+        story = []
+
+        # Заголовок
+        story.append(Paragraph("Паспорт безопасности", title_style))
+        story.append(Paragraph(
+            f"Узел: <b>{self.node.name}</b> ({self.get_node_type_russian(self.node.type)})",
+            subtitle_style
+        ))
+        story.append(Paragraph(
+            f"Дата формирования: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            subtitle_style
+        ))
+
+        # Подсчёт общего числа CVE
+        total_cves = sum(
+            1 for tags, v in rows
+            if not ("section_header" in tags or "component_header" in tags)
+            and v[4] and v[4] != "--"
+        )
+        story.append(Paragraph(
+            f"Всего найдено уязвимостей: <b>{total_cves}</b>",
+            subtitle_style
+        ))
+        story.append(Spacer(1, 8 * mm))
+
+        # Таблица
+        headers = [
+            "Идентификатор", "Наименование объекта", "Спецификация",
+            "CWE", "CVE", "CVSS V2", "CVSS V3", "CVSS V4"
+        ]
+        table_data = [[Paragraph(h, ParagraphStyle(
+            "HeadRu", fontName=font_bold, fontSize=9, textColor=colors.white, alignment=1
+        )) for h in headers]]
+
+        # Маркируем строки, чтобы назначить стили
+        style_cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#455A64")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, -1), font_name),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#CCCCCC")),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+        ]
+
+        for idx, (tags, values) in enumerate(rows, start=1):
+            # Оборачиваем длинный текст в Paragraph, чтобы reportlab переносил
+            wrapped = [Paragraph(v or "", body_style) for v in values]
+            table_data.append(wrapped)
+
+            if "section_header" in tags:
+                style_cmds.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#CFD8DC")))
+                style_cmds.append(("FONTNAME", (0, idx), (-1, idx), font_bold))
+            elif "component_header" in tags:
+                style_cmds.append(("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#ECEFF1")))
+                style_cmds.append(("FONTNAME", (0, idx), (-1, idx), font_bold))
+
+        # Ширина колонок — подбираем под альбомный A4 (≈ 277 мм полезной ширины)
+        col_widths = [
+            28 * mm,  # Идентификатор
+            50 * mm,  # Наименование
+            65 * mm,  # Спецификация
+            22 * mm,  # CWE
+            38 * mm,  # CVE
+            18 * mm,  # V2
+            18 * mm,  # V3
+            18 * mm,  # V4
+        ]
+
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle(style_cmds))
+        story.append(table)
+
+        try:
+            doc.build(story)
+            messagebox.showinfo(
+                "Экспорт завершён",
+                f"Паспорт безопасности сохранён в файл:\n{filename}"
+            )
+        except Exception as e:
+            messagebox.showerror("Ошибка экспорта", f"Не удалось создать PDF:\n{e}")
+
     def refresh_data(self):
-        """Обновляет данные."""
+        """Обновляет данные. Полностью сбрасывает кеш CVE для этого узла."""
+        # Полная инвалидация кеша — запрос к базе CVE пойдёт заново
+        self.node.properties.pop("security_passport_cache", None)
         for widget in self.dialog.winfo_children():
             widget.destroy()
         self.show_loading_screen()

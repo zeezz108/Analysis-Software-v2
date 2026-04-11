@@ -42,6 +42,10 @@ class ConnectivityMatrix:
         self.matrix: Dict[Tuple[str, str], ConnectionPath] = {}
         self._build_matrix()
 
+    # Типы узлов, которые МОГУТ выступать транзитом между другими узлами.
+    # Через них BFS прокладывает маршрут; остальные типы считаются конечными.
+    TRANSIT_NODE_TYPES = {"Router", "Switch", "Internet", "VirtualizationServer"}
+
     def _build_matrix(self):
         """Строит матрицу связности на основе всех данных."""
         nodes = self.board.nodes
@@ -58,69 +62,123 @@ class ConnectivityMatrix:
                         status=ConnectivityStatus.NONE
                     )
 
-        # 1. Проверяем прямые физические соединения с совместимыми IP
+        # 0. Строим граф физических соединений (по объектам Link)
+        self._build_physical_graph()
+
+        # 1. Прямое соединение (один физический линк)
         self._check_direct_connections()
 
-        # 2. Проверяем маршрутизацию
+        # 2. Маршрутизация через транзитные узлы (BFS по графу)
         self._check_routed_connections()
 
-        # 3. Проверяем VPN соединения
+        # 3. VPN соединения (ставятся с наивысшим приоритетом)
         self._check_vpn_connections()
 
-        # 4. Проверяем файерволы
+        # 4. Файерволы — блокировки
         self._check_firewall_blocks()
 
-    def _check_direct_connections(self):
-        """Проверяет прямые физические соединения."""
+    def _build_physical_graph(self) -> None:
+        """Строит неориентированный граф физических соединений.
+
+        adjacency[node_id] = set(соседних node_id)
+        """
+        self._adj: Dict[str, Set[str]] = {n.id: set() for n in self.board.nodes}
         for link in self.board.links:
-            # Получаем порты, участвующие в соединении
-            if link.is_wifi:
-                # Wi-Fi соединение
-                if link.a.id == link.wifi_ap_node_id:
-                    ap_node = link.a
-                    client_node = link.b
-                elif link.b.id == link.wifi_ap_node_id:
-                    ap_node = link.b
-                    client_node = link.a
-                else:
-                    continue
+            if link.a is None or link.b is None:
+                continue
+            self._adj.setdefault(link.a.id, set()).add(link.b.id)
+            self._adj.setdefault(link.b.id, set()).add(link.a.id)
 
-                # Находим IP портов
-                ap_ip = self._get_port_ip(ap_node, link.wifi_ap_port_id)
-                client_ip = self._get_port_ip(client_node, link.wifi_client_port_id)
+    def _node_by_id(self, nid: str) -> Optional[Node]:
+        for n in self.board.nodes:
+            if n.id == nid:
+                return n
+        return None
 
-                if self._are_ips_compatible(ap_ip, client_ip):
-                    self._set_connection(ap_node.id, client_node.id, ConnectivityStatus.DIRECT)
-            else:
-                # P2P соединение
-                port_a_id = link.ports_connected.get("a")
-                port_b_id = link.ports_connected.get("b")
+    def _check_direct_connections(self):
+        """Проверяет прямые физические соединения.
 
-                if port_a_id and port_b_id:
-                    ip_a = self._get_port_ip(link.a, port_a_id)
-                    ip_b = self._get_port_ip(link.b, port_b_id)
-
-                    if self._are_ips_compatible(ip_a, ip_b):
-                        self._set_connection(link.a.id, link.b.id, ConnectivityStatus.DIRECT)
+        Считаем пары узлов, соединённых одним физическим линком, «прямыми».
+        Совместимость IP более не требуется: если у пользователя линк есть —
+        значит он явно подключил узлы и ожидает увидеть связь.
+        """
+        for link in self.board.links:
+            if link.a is None or link.b is None:
+                continue
+            self._set_connection(link.a.id, link.b.id, ConnectivityStatus.DIRECT)
 
     def _check_routed_connections(self):
-        """Проверяет соединения через маршрутизацию с учётом таблиц маршрутизации."""
+        """Проверяет соединения через транзитные узлы.
+
+        Порядок проверок для каждой пары (src → dst):
+        1) Если у src есть своя routing_table и в ней есть маршрут для IP dst
+           (по Longest Prefix Match) — используем её (даёт ROUTED/DIRECT
+           с описанием через шлюз).
+        2) Иначе — BFS по графу физических соединений через транзитные узлы
+           (Router/Switch/Internet/VirtualizationServer). Если путь есть,
+           ставим ROUTED.
+        """
+        # Кэш типов узлов по id для BFS
+        node_type: Dict[str, str] = {n.id: n.type for n in self.board.nodes}
 
         for src in self.board.nodes:
+            path_map = self._bfs_paths_from(src.id, node_type)
             for dst in self.board.nodes:
-                if src.id == dst.id:
+                if dst.id == src.id:
                     continue
-
-                # 1. Уже есть прямое соединение?
                 if self._has_direct_connection(src.id, dst.id):
                     continue
 
-                # 2. Может ли src достичь dst по своей таблице маршрутизации?
+                # 1) Пробуем таблицу маршрутизации с longest prefix match.
                 if self._can_reach_via_routing_table(src, dst):
                     continue
 
-                # 3. Если нет таблицы, но есть маршрутизатор между подсетями
-                self._check_router_based_connection(src, dst)
+                # 2) BFS по транзитным узлам.
+                path = path_map.get(dst.id)
+                if not path:
+                    continue
+                transit_names: List[str] = []
+                for inter_id in path[1:-1]:
+                    n = self._node_by_id(inter_id)
+                    if n is not None:
+                        transit_names.append(n.name)
+                if transit_names:
+                    reason = "через " + " → ".join(transit_names)
+                else:
+                    reason = "через транзитные узлы"
+                self._set_connection(
+                    src.id, dst.id,
+                    ConnectivityStatus.ROUTED,
+                    path_nodes=list(path),
+                    reason=reason,
+                )
+
+    def _bfs_paths_from(self, start_id: str, node_type: Dict[str, str]) -> Dict[str, List[str]]:
+        """BFS от start_id до всех достижимых узлов.
+
+        Промежуточные узлы на пути должны быть транзитными (Router/Switch/
+        Internet/VirtualizationServer). Конечный узел может быть любым.
+        Возвращает словарь `{dst_id: [start_id, ..., dst_id]}`.
+        """
+        from collections import deque
+
+        visited: Dict[str, List[str]] = {start_id: [start_id]}
+        queue = deque([start_id])
+
+        while queue:
+            cur = queue.popleft()
+            cur_path = visited[cur]
+            for neighbor in self._adj.get(cur, ()):  # соседи по физическим линкам
+                if neighbor in visited:
+                    continue
+                visited[neighbor] = cur_path + [neighbor]
+                # Разворачивать BFS дальше можно только через транзитный узел
+                if node_type.get(neighbor) in self.TRANSIT_NODE_TYPES:
+                    queue.append(neighbor)
+
+        # Убираем сам start из результата
+        visited.pop(start_id, None)
+        return visited
 
     def _has_direct_connection(self, src_id: str, dst_id: str) -> bool:
         """Проверяет, есть ли уже прямое соединение между узлами."""
@@ -130,8 +188,12 @@ class ConnectivityMatrix:
         return False
 
     def _can_reach_via_routing_table(self, src: Node, dst: Node) -> bool:
-        """Проверяет, может ли src достичь dst по своей таблице маршрутизации."""
+        """Проверяет, может ли src достичь dst по своей таблице маршрутизации.
 
+        Использует алгоритм Longest Prefix Match: из всех совпадающих маршрутов
+        выбирается тот, у которого максимальная длина префикса; при равенстве
+        длины — с минимальной метрикой.
+        """
         if not hasattr(src, 'routing_table') or not src.routing_table:
             return False
 
@@ -141,31 +203,53 @@ class ConnectivityMatrix:
 
         dst_addr = dst_ip.split('/')[0]
 
+        from models.route import Route
+        best_route: Optional[Route] = None
         for route_data in src.routing_table:
-            from models.route import Route
             route = Route.from_dict(route_data)
+            if not route.matches_ip(dst_addr):
+                continue
+            if best_route is None:
+                best_route = route
+                continue
+            # Longest Prefix Match: длинный префикс выигрывает
+            if route.prefix_length() > best_route.prefix_length():
+                best_route = route
+            elif route.prefix_length() == best_route.prefix_length():
+                # Tie-breaker: меньшая метрика
+                if (route.metric or 0) < (best_route.metric or 0):
+                    best_route = route
 
-            # Проверяем, принадлежит ли dst сети назначения
-            if self._is_ip_in_network(dst_addr, route.destination, route.netmask):
-                # Нашли маршрут!
-                gateway = route.gateway
+        if best_route is None:
+            return False
 
-                if gateway == "0.0.0.0":
-                    # Прямое подключение
-                    self._set_connection(src.id, dst.id, ConnectivityStatus.DIRECT)
-                else:
-                    # Идём через шлюз
-                    gateway_node = self._find_node_by_ip(gateway)
-                    if gateway_node:
-                        self._set_connection(
-                            src.id, dst.id,
-                            ConnectivityStatus.ROUTED,
-                            path_nodes=[src.id, gateway_node.id, dst.id],
-                            reason=f"через шлюз {gateway}"
-                        )
-                return True
-
-        return False
+        gateway = best_route.gateway
+        if gateway == "0.0.0.0":
+            # Прямое подключение — явно проставляем DIRECT.
+            self._set_connection(
+                src.id, dst.id,
+                ConnectivityStatus.DIRECT,
+                reason=f"по маршруту {best_route.get_cidr_notation()}"
+            )
+        else:
+            # Идём через шлюз: ищем узел с таким IP
+            gateway_node = self._find_node_by_ip(gateway)
+            if gateway_node:
+                self._set_connection(
+                    src.id, dst.id,
+                    ConnectivityStatus.ROUTED,
+                    path_nodes=[src.id, gateway_node.id, dst.id],
+                    reason=f"через шлюз {gateway} ({best_route.get_cidr_notation()})"
+                )
+            else:
+                # Шлюз неизвестен — маршрут «виртуальный», но всё равно считаем,
+                # что src маршрут нашёл.
+                self._set_connection(
+                    src.id, dst.id,
+                    ConnectivityStatus.ROUTED,
+                    reason=f"через шлюз {gateway}"
+                )
+        return True
 
     def _check_router_based_connection(self, src: Node, dst: Node):
         """Проверяет соединение через маршрутизатор (если у src нет таблицы)."""
@@ -273,22 +357,36 @@ class ConnectivityMatrix:
         return networks
 
     def _check_vpn_connections(self):
-        """Проверяет VPN соединения."""
-        for node in self.board.nodes:
-            if node.vpn_client_enabled and node.vpn_client_peer_id:
-                # Клиент подключён к серверу
-                server = self.board.find_node(node.vpn_client_peer_id)
-                if server and server.vpn_server_enabled:
-                    # Проверяем совпадение параметров
-                    client_ip = node.vpn_client_tunnel_ip.split('/')[0] if node.vpn_client_tunnel_ip else ""
-                    server_ips = [ip.split('/')[0] for ip in (server.vpn_server_tunnel_ips or []) if ip]
+        """Проверяет VPN соединения.
 
-                    if client_ip in server_ips:
-                        self._set_connection(
-                            node.id, server.id,
-                            ConnectivityStatus.VPN,
-                            reason=f"VPN туннель: {client_ip} -> {server_ips}"
-                        )
+        Пара (VPN-клиент, VPN-сервер) помечается как VPN, если клиент
+        указал peer = id сервера, и на сервере включён vpn_server_enabled.
+        Совпадение туннельных IP желательно, но не обязательно: если они
+        настроены, добавляем их в описание маршрута.
+        """
+        for node in self.board.nodes:
+            if not (node.vpn_client_enabled and node.vpn_client_peer_id):
+                continue
+            server = self.board.find_node(node.vpn_client_peer_id)
+            if not server or not server.vpn_server_enabled:
+                continue
+
+            client_ip = node.vpn_client_tunnel_ip.split('/')[0] if node.vpn_client_tunnel_ip else ""
+            server_ips = [ip.split('/')[0] for ip in (server.vpn_server_tunnel_ips or []) if ip]
+
+            protocol = getattr(node, "vpn_client_protocol", "") or getattr(server, "vpn_server_protocol", "")
+            protocol_label = f" [{protocol}]" if protocol else ""
+
+            if client_ip and server_ips:
+                reason = f"VPN туннель{protocol_label}: {client_ip} → {', '.join(server_ips)}"
+            else:
+                reason = f"VPN туннель{protocol_label} (клиент {node.name} ↔ сервер {server.name})"
+
+            self._set_connection(
+                node.id, server.id,
+                ConnectivityStatus.VPN,
+                reason=reason
+            )
 
     def _check_firewall_blocks(self):
         """Проверяет, не блокирует ли файервол соединения."""
@@ -386,8 +484,13 @@ class ConnectivityMatrix:
 
     def _set_connection(self, src_id: str, dst_id: str, status: ConnectivityStatus,
                         path_nodes: List[str] = None, reason: str = ""):
-        """Устанавливает соединение в матрице (в обе стороны)."""
-        priority = {ConnectivityStatus.DIRECT: 4, ConnectivityStatus.VPN: 3,
+        """Устанавливает соединение в матрице (в обе стороны).
+
+        Приоритет: VPN > DIRECT > ROUTED > BLOCKED > NONE.
+        VPN перекрывает прямое соединение, чтобы в таблице связей пара
+        клиент↔сервер VPN отображалась именно как VPN-туннель.
+        """
+        priority = {ConnectivityStatus.VPN: 5, ConnectivityStatus.DIRECT: 4,
                     ConnectivityStatus.ROUTED: 2, ConnectivityStatus.BLOCKED: 1,
                     ConnectivityStatus.NONE: 0}
 

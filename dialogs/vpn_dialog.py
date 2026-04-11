@@ -14,6 +14,26 @@ from models.zone import Board
 from utils.validators import validate_ip, validate_mask
 
 
+# Список поддерживаемых VPN-протоколов.
+# Порядок задаёт приоритет в выпадающем списке: современные сверху,
+# устаревшие с пометкой помечены ниже (их по-прежнему встречают в дикой
+# природе, но использовать не рекомендуется).
+VPN_PROTOCOLS = [
+    "WireGuard",               # современный, самый быстрый, рекомендован по умолчанию
+    "OpenVPN (UDP)",           # проверенный стандарт, AES-256
+    "OpenVPN (TCP)",           # то же, но по TCP — обходит некоторые фильтры
+    "IKEv2/IPSec",             # надёжен на мобильных (роуминг)
+    "IPSec",                   # самостоятельный IPSec (site-to-site)
+    "SSTP",                    # tunнелирование по TLS (Microsoft)
+    "L2TP/IPSec (устарел)",    # устаревший, только с IPsec
+    "PPTP (небезопасен)",      # морально устарел, небезопасен
+    "SoftEther",               # мультипротокольная платформа
+    "GRE",                     # site-to-site инкапсуляция
+]
+
+VPN_DEFAULT_PROTOCOL = "WireGuard"
+
+
 class VPNConfigDialog:
     """Диалог настройки VPN на узле (клиент и сервер)."""
 
@@ -161,6 +181,27 @@ class VPNConfigDialog:
 
     def create_client_settings(self, parent):
         """Создаёт настройки для VPN-клиента."""
+        # Протокол
+        protocol_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        protocol_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ctk.CTkLabel(
+            protocol_frame,
+            text="VPN-протокол:",
+            font=("Arial", 12, "bold")
+        ).pack(anchor=tk.W)
+
+        current_client_protocol = getattr(self.node, "vpn_client_protocol", VPN_DEFAULT_PROTOCOL) or VPN_DEFAULT_PROTOCOL
+        self.client_protocol_var = tk.StringVar(value=current_client_protocol)
+        self.client_protocol_combo = ctk.CTkComboBox(
+            protocol_frame,
+            values=VPN_PROTOCOLS,
+            variable=self.client_protocol_var,
+            state="readonly",
+            width=260
+        )
+        self.client_protocol_combo.pack(anchor=tk.W, pady=5)
+
         # VPN IP сервера (куда подключаемся)
         server_ip_frame = ctk.CTkFrame(parent, fg_color="transparent")
         server_ip_frame.pack(fill=tk.X, pady=(0, 10))
@@ -248,6 +289,27 @@ class VPNConfigDialog:
 
     def create_server_settings(self, parent):
         """Создаёт настройки для VPN-сервера."""
+        # Протокол
+        protocol_frame = ctk.CTkFrame(parent, fg_color="transparent")
+        protocol_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ctk.CTkLabel(
+            protocol_frame,
+            text="VPN-протокол:",
+            font=("Arial", 12, "bold")
+        ).pack(anchor=tk.W)
+
+        current_server_protocol = getattr(self.node, "vpn_server_protocol", VPN_DEFAULT_PROTOCOL) or VPN_DEFAULT_PROTOCOL
+        self.server_protocol_var = tk.StringVar(value=current_server_protocol)
+        self.server_protocol_combo = ctk.CTkComboBox(
+            protocol_frame,
+            values=VPN_PROTOCOLS,
+            variable=self.server_protocol_var,
+            state="readonly",
+            width=260
+        )
+        self.server_protocol_combo.pack(anchor=tk.W, pady=5)
+
         # VPN IP сервера
         server_ip_frame = ctk.CTkFrame(parent, fg_color="transparent")
         server_ip_frame.pack(fill=tk.X, pady=(0, 10))
@@ -502,6 +564,7 @@ class VPNConfigDialog:
             self.node.vpn_client_server_ip = server_ip
             self.node.vpn_client_port = port_int
             self.node.vpn_client_tunnel_ip = f"{virtual_ip}/{virtual_mask}"
+            self.node.vpn_client_protocol = self.client_protocol_var.get() or VPN_DEFAULT_PROTOCOL
         else:
             self.node.vpn_client_enabled = False
             self.node.vpn_client_server_ip = ""
@@ -549,6 +612,7 @@ class VPNConfigDialog:
             self.node.vpn_server_port = port_int
             self.node.vpn_server_remote_network = network
             self.node.vpn_server_remote_mask = network_mask
+            self.node.vpn_server_protocol = self.server_protocol_var.get() or VPN_DEFAULT_PROTOCOL
         else:
             self.node.vpn_server_enabled = False
             self.node.vpn_server_tunnel_ips = []

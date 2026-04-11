@@ -9,3 +9,8 @@ build/
 .DS_Store
 Thumbs.db
 database/cve_database.db
+
+# Локальные конфиги и рабочие материалы — не для репозитория
+.claude/
+Promts/
+config/scaling.json

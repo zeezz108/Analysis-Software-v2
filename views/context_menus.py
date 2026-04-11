@@ -40,6 +40,10 @@ class ZoneContextMenuHandler:
             label="📏 Изменить размер",
             command=lambda: canvas_view.start_zone_resize(zone)
         )
+        menu.add_command(
+            label="🗑 Удалить зону",
+            command=lambda: canvas_view.delete_zone(zone)
+        )
 
         # Информация об узлах в зоне
         nodes_in_zone = [n for n in canvas_view.board.nodes if n.zone.id == zone.id]
@@ -131,11 +135,7 @@ class NodeContextMenuHandler:
 
         menu.add_separator()
 
-        # ===== РАЗМЕР И УДАЛЕНИЕ =====
-        menu.add_command(
-            label="📏 Изменить размер",
-            command=lambda: canvas_view.start_node_resize(node)
-        )
+        # ===== УДАЛЕНИЕ =====
         menu.add_command(
             label="🗑 Удалить узел",
             command=lambda: canvas_view.delete_node(node)

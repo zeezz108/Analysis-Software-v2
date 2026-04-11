@@ -32,16 +32,27 @@ class FirewallDialog:
             self.manager = FirewallManager(node.id)
             self.add_demo_rules()
 
+        # Флаг фиксации изменений: выставляется только при нажатии «Сохранить».
+        # При закрытии окна крестиком или «Отмена» изменения не применяются.
+        self.saved = False
+
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"Настройка межсетевого экрана - {node.name}")
         self.dialog.geometry("1300x850")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
+        # Закрытие через крестик = отмена изменений
+        self.dialog.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
         self.create_widgets()
         self.center_window()
         self.refresh_rules_list()
+
+    def _on_cancel(self):
+        """Закрытие без сохранения — изменения не применяются."""
+        self.saved = False
+        self.dialog.destroy()
 
     def center_window(self):
         self.dialog.update_idletasks()
@@ -186,7 +197,7 @@ class FirewallDialog:
         btn_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
         btn_frame.pack(side=tk.RIGHT)
 
-        ctk.CTkButton(btn_frame, text="✕ Закрыть", command=self.dialog.destroy, width=100).pack(side=tk.RIGHT, padx=5)
+        ctk.CTkButton(btn_frame, text="✕ Отмена", command=self._on_cancel, width=100).pack(side=tk.RIGHT, padx=5)
         ctk.CTkButton(btn_frame, text="💾 Сохранить", command=self.save_settings, width=100, fg_color="#4CAF50").pack(
             side=tk.RIGHT, padx=5)
         ctk.CTkButton(btn_frame, text="↻ Обновить", command=self.refresh_rules_list, width=100).pack(side=tk.RIGHT,
@@ -461,6 +472,7 @@ class FirewallDialog:
         self.manager.notification_enabled = self.notify_var.get()
 
     def save_settings(self):
+        self.saved = True
         messagebox.showinfo("Сохранение", "Настройки файервола сохранены!")
         self.dialog.destroy()
 
@@ -478,7 +490,7 @@ class FirewallRuleDialog:
 
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(title_text)
-        self.dialog.geometry("750x700")
+        self.dialog.geometry("750x800")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()

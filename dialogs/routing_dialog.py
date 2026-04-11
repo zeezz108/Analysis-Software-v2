@@ -14,7 +14,8 @@ from typing import List, Optional
 from models.node import Node
 from models.route import Route
 from utils.generators import uid
-from utils.network_utils import calculate_network
+from utils.network_utils import calculate_network, decimal_mask_to_cidr
+from utils.validators import validate_ip
 
 
 class RouteEditDialog:
@@ -28,8 +29,8 @@ class RouteEditDialog:
 
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title("Редактирование маршрута" if route else "Новый маршрут")
-        self.dialog.geometry("550x500")
-        self.dialog.resizable(False, False)
+        self.dialog.geometry("550x650")
+        self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
@@ -144,30 +145,86 @@ class RouteEditDialog:
                      text_color="gray").pack()
 
     def save_route(self):
-        """Сохраняет маршрут."""
-        dest = self.dest_var.get().strip()
-        mask = self.mask_var.get().strip()
-        gw = self.gw_var.get().strip()
-        iface = self.iface_var.get().strip()
-        metric = self.metric_var.get()
+        """Сохраняет маршрут после валидации и нормализации.
 
-        if not dest:
-            messagebox.showerror("Ошибка", "Укажите сеть назначения!")
+        Проверки:
+        - destination — валидный IPv4 (или "0.0.0.0" для маршрута по умолчанию).
+        - netmask — CIDR (0–32) либо десятичная маска (255.х.х.х).
+        - gateway — валидный IPv4 (или "0.0.0.0" для прямого маршрута).
+        - metric — целое неотрицательное.
+
+        Нормализация:
+        - destination переписывается в сетевой адрес по маске
+          (host-биты обнуляются), как это делает реальный роутер.
+        - Маска приводится к CIDR для единообразия.
+        """
+        dest = self.dest_var.get().strip()
+        mask = self.mask_var.get().strip() or "0"
+        gw = self.gw_var.get().strip() or "0.0.0.0"
+        iface = self.iface_var.get().strip()
+
+        try:
+            metric = int(self.metric_var.get())
+        except (ValueError, tk.TclError):
+            messagebox.showerror("Ошибка", "Метрика должна быть целым числом.")
+            return
+        if metric < 0:
+            messagebox.showerror("Ошибка", "Метрика не может быть отрицательной.")
             return
 
+        if not dest:
+            messagebox.showerror("Ошибка", "Укажите сеть назначения (IP).")
+            return
+        if not validate_ip(dest):
+            messagebox.showerror("Ошибка", f"Некорректный IP сети назначения: {dest}")
+            return
+        if not validate_ip(gw):
+            messagebox.showerror("Ошибка", f"Некорректный IP шлюза: {gw}")
+            return
+
+        # Нормализуем маску: принимаем и «24», и «255.255.255.0»
+        if mask.isdigit():
+            cidr = int(mask)
+            if not (0 <= cidr <= 32):
+                messagebox.showerror("Ошибка", "CIDR маски должен быть в диапазоне 0..32.")
+                return
+        else:
+            cidr = decimal_mask_to_cidr(mask)
+            if cidr == 0 and mask != "0.0.0.0":
+                messagebox.showerror("Ошибка", f"Некорректная маска: {mask}")
+                return
+
+        # Нормализуем destination к сетевому адресу (host-биты = 0)
+        normalized_dest = calculate_network(dest, str(cidr))
+
+        # Проверка согласованности default-маршрута
+        if cidr == 0 and normalized_dest != "0.0.0.0":
+            messagebox.showerror(
+                "Ошибка",
+                "Маршрут с маской /0 — это маршрут по умолчанию, "
+                "destination должен быть 0.0.0.0."
+            )
+            return
+
+        # Запрещаем явно битые сочетания (direct-route должен иметь gateway=0.0.0.0)
+        if gw != "0.0.0.0":
+            # Сам шлюз не должен совпадать с сетью назначения (он должен быть хостом)
+            if calculate_network(gw, str(cidr)) == normalized_dest and cidr < 32:
+                pass  # валидно: шлюз находится в той же подсети — типичный случай
+
         if self.route:
-            self.route.destination = dest
-            self.route.netmask = mask if mask else "0.0.0.0"
-            self.route.gateway = gw if gw else "0.0.0.0"
+            self.route.destination = normalized_dest
+            self.route.netmask = str(cidr)
+            self.route.gateway = gw
             self.route.interface = iface
             self.route.metric = metric
             self.result = self.route
         else:
             self.result = Route(
                 route_id=uid(),
-                destination=dest,
-                netmask=mask if mask else "0.0.0.0",
-                gateway=gw if gw else "0.0.0.0",
+                destination=normalized_dest,
+                netmask=str(cidr),
+                gateway=gw,
                 interface=iface,
                 metric=metric
             )
@@ -231,8 +288,6 @@ class RoutingTableDialog:
                                                                                                        padx=2)
         ctk.CTkButton(toolbar, text="🗑 Удалить", command=self.delete_route, width=100, height=32,
                       fg_color="#F44336").pack(side=tk.LEFT, padx=2)
-        ctk.CTkButton(toolbar, text="⚙️ Авто-генерация", command=self.auto_generate, width=130, height=32).pack(
-            side=tk.LEFT, padx=2)
         ctk.CTkButton(toolbar, text="📋 Копировать", command=self.copy_route, width=100, height=32).pack(side=tk.LEFT,
                                                                                                         padx=2)
 
@@ -291,30 +346,49 @@ class RoutingTableDialog:
         return selection[0] if selection else None
 
     def refresh_table(self):
-        """Обновляет таблицу из данных узла."""
+        """Обновляет таблицу из данных узла.
+
+        Маршруты сортируются по:
+        1) Длине префикса (длинная маска — более специфичный маршрут, выше);
+        2) Метрике (меньше — выше);
+        Это соответствует порядку Longest Prefix Match: роутер выбирает
+        первый подходящий маршрут именно в таком порядке.
+        """
         for item in self.tree.get_children():
             self.tree.delete(item)
 
         if not hasattr(self.node, 'routing_table'):
             self.node.routing_table = []
 
-        for route_data in self.node.routing_table:
-            route = Route.from_dict(route_data)
+        # Сортировка по longest prefix match → метрика → стабильный порядок
+        routes = [Route.from_dict(rd) for rd in self.node.routing_table]
+        routes.sort(key=lambda r: (-r.prefix_length(), r.metric or 0))
 
+        for route in routes:
             tags = ()
-            if route.destination == "0.0.0.0" and route.netmask == "0.0.0.0":
+            if route.is_default_route():
                 tags = ('default',)
+            elif route.is_connected_route():
+                tags = ('connected',)
+
+            netmask_display = route.netmask if not route.netmask.isdigit() else f"/{route.netmask}"
 
             self.tree.insert("", tk.END, iid=route.route_id, values=(
-                route.destination, route.netmask, route.gateway, route.interface, route.metric
+                route.destination, netmask_display, route.gateway, route.interface, route.metric
             ), tags=tags)
 
         if ctk.get_appearance_mode() == "Light":
             self.tree.tag_configure('default', background='#e3f2fd')
+            self.tree.tag_configure('connected', background='#e8f5e9')
         else:
             self.tree.tag_configure('default', background='#1a3a4a')
+            self.tree.tag_configure('connected', background='#1b3a1b')
 
-        self.routes_count_label.configure(text=f"✅ Всего маршрутов: {len(self.node.routing_table)}", text_color="green")
+        self.routes_count_label.configure(
+            text=f"✅ Всего маршрутов: {len(self.node.routing_table)}   "
+                 f"(сортировка: longest prefix match)",
+            text_color="green"
+        )
 
     def add_route(self):
         dialog = RouteEditDialog(self.dialog, self.node)
@@ -377,47 +451,6 @@ class RoutingTableDialog:
                 self.dialog.clipboard_append(text)
                 messagebox.showinfo("Скопировано", "Команда маршрута скопирована в буфер обмена")
                 break
-
-    def auto_generate(self):
-        """Автоматически генерирует таблицу маршрутизации."""
-        if not messagebox.askyesno("Автогенерация", "Это заменит текущую таблицу маршрутизации. Продолжить?"):
-            return
-
-        new_table = []
-
-        # Прямые маршруты
-        for port in self.node.ports:
-            ip = port.get("ip_address", "")
-            mask = port.get("subnet_mask", "")
-            port_name = port.get("name", "")
-
-            if ip and mask:
-                network = calculate_network(ip, mask)
-                new_table.append(Route(
-                    route_id=uid(), destination=network, netmask=mask,
-                    gateway="0.0.0.0", interface=port_name, metric=1
-                ).to_dict())
-
-        # Маршрут по умолчанию
-        default_gateway = None
-        default_interface = None
-
-        for port in self.node.ports:
-            if port.get("connected_to") and port.get("ip_address"):
-                default_interface = port.get("name", "")
-                default_gateway = port.get("ip_address", "")
-                break
-
-        if default_interface:
-            new_table.append(Route(
-                route_id=uid(), destination="0.0.0.0", netmask="0.0.0.0",
-                gateway=default_gateway if default_gateway else "192.168.1.1",
-                interface=default_interface, metric=10
-            ).to_dict())
-
-        self.node.routing_table = new_table
-        self.refresh_table()
-        messagebox.showinfo("Успех", f"Сгенерировано {len(new_table)} маршрутов")
 
     def save(self):
         self.result = self.node.routing_table

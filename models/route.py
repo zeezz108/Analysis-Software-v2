@@ -120,8 +120,43 @@ class Route:
             from utils.network_utils import decimal_mask_to_cidr
             cidr = decimal_mask_to_cidr(self.netmask)
             return f"{self.destination}/{cidr}"
-        except:
+        except Exception:
             return f"{self.destination}/{self.netmask}"
+
+    def prefix_length(self) -> int:
+        """Возвращает длину префикса маски в битах (CIDR).
+
+        Используется для Longest Prefix Match при выборе маршрута.
+        """
+        try:
+            if self.netmask.isdigit():
+                return max(0, min(32, int(self.netmask)))
+            from utils.network_utils import decimal_mask_to_cidr
+            return decimal_mask_to_cidr(self.netmask)
+        except Exception:
+            return 0
+
+    def normalized_destination(self) -> str:
+        """Возвращает адрес сети, нормализованный по маске (host bits = 0).
+
+        Например, destination=192.168.1.55, netmask=24 → 192.168.1.0
+        """
+        try:
+            from utils.network_utils import calculate_network
+            return calculate_network(self.destination, self.netmask)
+        except Exception:
+            return self.destination
+
+    def matches_ip(self, ip: str) -> bool:
+        """Проверяет, подходит ли этот маршрут для данного IP."""
+        try:
+            from utils.network_utils import is_ip_in_network
+            if self.destination == "0.0.0.0" and self.prefix_length() == 0:
+                # Default-route совпадает с любым IP
+                return True
+            return is_ip_in_network(ip, self.destination, self.netmask)
+        except Exception:
+            return False
 
     def get_display_string(self) -> str:
         """

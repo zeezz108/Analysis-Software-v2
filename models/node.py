@@ -248,6 +248,7 @@ class Node:
     vpn_client_remote_mask: str = ""
     vpn_client_server_ip: str = ""  # VPN IP сервера
     vpn_client_port: Optional[int] = None  # Порт сервера
+    vpn_client_protocol: str = "WireGuard"  # VPN-протокол клиента
 
     # VPN поля для сервера
     vpn_server_enabled: bool = False
@@ -257,6 +258,7 @@ class Node:
     vpn_server_remote_network: str = ""
     vpn_server_remote_mask: str = ""
     vpn_server_port: Optional[int] = None  # Порт сервера
+    vpn_server_protocol: str = "WireGuard"  # VPN-протокол сервера
 
     properties: Dict[str, Any] = field(default_factory=lambda: {
         "hardware": [],
@@ -553,6 +555,7 @@ class Node:
             "vpn_client_remote_mask": self.vpn_client_remote_mask,
             "vpn_client_server_ip": self.vpn_client_server_ip,
             "vpn_client_port": self.vpn_client_port,
+            "vpn_client_protocol": self.vpn_client_protocol,
 
             "vpn_server_enabled": self.vpn_server_enabled,
             "vpn_server_tunnel_ips": self.vpn_server_tunnel_ips.copy(),
@@ -561,6 +564,7 @@ class Node:
             "vpn_server_remote_network": self.vpn_server_remote_network,
             "vpn_server_remote_mask": self.vpn_server_remote_mask,
             "vpn_server_port": self.vpn_server_port,
+            "vpn_server_protocol": self.vpn_server_protocol,
 
             "properties": self.properties.copy(),
             "ports": [p.copy() for p in self.ports],
@@ -590,12 +594,14 @@ class Node:
             vpn_client_peer_ip=data.get("vpn_client_peer_ip", ""),
             vpn_client_remote_network=data.get("vpn_client_remote_network", ""),
             vpn_client_remote_mask=data.get("vpn_client_remote_mask", ""),
+            vpn_client_protocol=data.get("vpn_client_protocol", "WireGuard"),
             vpn_server_enabled=data.get("vpn_server_enabled", False),
             vpn_server_tunnel_ips=data.get("vpn_server_tunnel_ips", []),
             vpn_server_clients=data.get("vpn_server_clients", []),
             vpn_server_real_ip=data.get("vpn_server_real_ip", ""),
             vpn_server_remote_network=data.get("vpn_server_remote_network", ""),
             vpn_server_remote_mask=data.get("vpn_server_remote_mask", ""),
+            vpn_server_protocol=data.get("vpn_server_protocol", "WireGuard"),
             properties=data.get("properties", {"hardware": [], "software": [], "network": []}),
             ports=data.get("ports", []),
             physical_port_count=data.get("physical_port_count", 0),

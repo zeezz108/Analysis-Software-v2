@@ -330,6 +330,27 @@ class LinkPortSelectionDialog:
 
     def create_port_list(self, parent, node: Node, var: tk.StringVar, port_type: str):
         """Создаёт список портов для выбора."""
+        # Узел «Интернет» имеет «бесконечный порт»: не показываем список
+        # существующих портов, а предлагаем автоматическое подключение.
+        if node.type == "Internet" and port_type in ("ethernet", "pon"):
+            scroll_frame = ctk.CTkFrame(parent, fg_color="transparent")
+            scroll_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+            info_frame = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+            info_frame.pack(fill=tk.X, pady=2)
+
+            rb = ctk.CTkRadioButton(
+                info_frame,
+                text="🌐 Автоматическое подключение (порт будет создан)",
+                variable=var,
+                value="__auto__",
+                font=("Arial", 11)
+            )
+            rb.pack(anchor=tk.W, padx=5, pady=2)
+            # Выбираем автоматически, чтобы пользователь ничего не искал
+            var.set("__auto__")
+            return
+
         ports = [p for p in node.ports if p.get("port_type") == port_type]
 
         if not ports:
@@ -409,12 +430,36 @@ class LinkPortSelectionDialog:
             messagebox.showerror("Ошибка", "Выберите порты на обоих узлах!")
             return
 
+        conn_type = self.connection_type.get()
+        port_type = "pon" if conn_type == "pon" else "ethernet"
+
+        # Для узла «Интернет» порт создаётся автоматически (бесконечный порт).
+        if port_a_id == "__auto__" and self.node_a.type == "Internet":
+            port_a_id = self._spawn_internet_port(self.node_a, port_type)
+        if port_b_id == "__auto__" and self.node_b.type == "Internet":
+            port_b_id = self._spawn_internet_port(self.node_b, port_type)
+
+        if not port_a_id or not port_b_id:
+            messagebox.showerror("Ошибка", "Не удалось создать автоматический порт.")
+            return
+
         self.result = {
             "type": "p2p",
             "port_a": port_a_id,
             "port_b": port_b_id
         }
         self.dialog.destroy()
+
+    @staticmethod
+    def _spawn_internet_port(node: Node, port_type: str) -> Optional[str]:
+        """Создаёт новый порт на узле Интернет и возвращает его port_id."""
+        before = {p.get("port_id") for p in node.ports}
+        if not node.add_port(port_type=port_type):
+            return None
+        after = [p for p in node.ports if p.get("port_id") not in before]
+        if not after:
+            return None
+        return after[-1].get("port_id")
 
     def create_wifi_link(self):
         """Создаёт Wi-Fi соединение."""

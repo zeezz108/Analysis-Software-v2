@@ -35,6 +35,14 @@ class CanvasView:
     NODE_ICONS = {}
     ICON_BOUNDS_CACHE = {}
 
+    # Размеры «мирового» холста (в логических координатах, без учёта зума)
+    WORLD_WIDTH = 4000
+    WORLD_HEIGHT = 3000
+
+    # Дискретные уровни зума — шаг как у размерной сетки
+    ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
+    ZOOM_DEFAULT = 0.75  # Стартовый зум: иконки оптимального размера, холст больше окна
+
     def __init__(self, root: tk.Tk, board: Board):
         self.root = root
         self.board = board
@@ -45,6 +53,9 @@ class CanvasView:
         self.link_start_node: Optional[Node] = None
         self.mode = "idle"
 
+        # Зум холста
+        self.zoom = self.ZOOM_DEFAULT
+
         # Drag and drop
         self.dragging = False
         self.drag_node: Optional[Node] = None
@@ -54,12 +65,7 @@ class CanvasView:
         self.drag_zone: Optional[Zone] = None
         self.drag_zone_offset: Tuple[float, float] = (0, 0)
 
-        # Resize
-        self.resizing_node = False
-        self.resize_node: Optional[Node] = None
-        self.resize_node_corner: Optional[str] = None
-        self.resize_node_start: Optional[Tuple] = None
-
+        # Ресайз зоны (ресайз узлов отключён по требованию)
         self.resizing_zone = False
         self.resize_zone: Optional[Zone] = None
         self.resize_zone_corner: Optional[str] = None
@@ -116,6 +122,119 @@ class CanvasView:
         if not self.grid_enabled or self.grid_size <= 1:
             return size
         return max(self.grid_size, round(size / self.grid_size) * self.grid_size)
+
+    # ===== Зум: преобразование координат «мира» и холста =====
+    def w2c(self, v: float) -> float:
+        """World -> Canvas: умножает мировую координату/размер на текущий зум."""
+        return v * self.zoom
+
+    def c2w(self, v: float) -> float:
+        """Canvas -> World: делит координату холста на текущий зум."""
+        return v / self.zoom if self.zoom else v
+
+    def canvas_event_world(self, event) -> Tuple[float, float]:
+        """Возвращает мировые координаты точки события."""
+        cx = self.canvas.canvasx(event.x)
+        cy = self.canvas.canvasy(event.y)
+        return (self.c2w(cx), self.c2w(cy))
+
+    def font_scaled(self, base_size: int, weight: str = "normal") -> tuple:
+        """Возвращает кортеж шрифта с размером, скорректированным под текущий зум."""
+        size = max(6, int(round(base_size * self.zoom)))
+        if weight and weight != "normal":
+            return ("Arial", size, weight)
+        return ("Arial", size)
+
+    def update_scrollregion(self) -> None:
+        """Обновляет область прокрутки холста под текущий зум."""
+        try:
+            self.canvas.configure(scrollregion=(
+                0, 0,
+                int(self.WORLD_WIDTH * self.zoom),
+                int(self.WORLD_HEIGHT * self.zoom),
+            ))
+        except Exception:
+            pass
+
+    def _set_zoom(self, new_zoom: float, anchor_screen: Optional[Tuple[int, int]] = None) -> None:
+        """Устанавливает новый уровень зума, стараясь сохранить точку под курсором."""
+        new_zoom = max(self.ZOOM_LEVELS[0], min(self.ZOOM_LEVELS[-1], new_zoom))
+        if abs(new_zoom - self.zoom) < 1e-6:
+            return
+
+        # Сохраняем мировую точку под якорем, чтобы не «уплывала» при зуме
+        anchor_world = None
+        if anchor_screen is not None:
+            sx, sy = anchor_screen
+            cx = self.canvas.canvasx(sx)
+            cy = self.canvas.canvasy(sy)
+            anchor_world = (self.c2w(cx), self.c2w(cy))
+
+        old_zoom = self.zoom
+        self.zoom = new_zoom
+        self.clear_icon_bounds_cache()
+        self.update_scrollregion()
+        self.redraw()
+        # Обновляем индикатор зума, если он уже создан
+        if hasattr(self, "zoom_label") and self.zoom_label is not None:
+            try:
+                self.zoom_label.configure(text=f"{int(round(self.zoom * 100))}%")
+            except Exception:
+                pass
+
+        # Скроллим так, чтобы якорь остался под курсором
+        if anchor_world is not None and anchor_screen is not None:
+            new_cx = self.w2c(anchor_world[0])
+            new_cy = self.w2c(anchor_world[1])
+            # xview_moveto работает с долей от scrollregion
+            region_w = max(1, self.WORLD_WIDTH * self.zoom)
+            region_h = max(1, self.WORLD_HEIGHT * self.zoom)
+            sx, sy = anchor_screen
+            target_x = (new_cx - sx) / region_w
+            target_y = (new_cy - sy) / region_h
+            try:
+                self.canvas.xview_moveto(max(0.0, min(1.0, target_x)))
+                self.canvas.yview_moveto(max(0.0, min(1.0, target_y)))
+            except Exception:
+                pass
+
+    def zoom_in(self, anchor: Optional[Tuple[int, int]] = None) -> None:
+        """Увеличивает зум до следующего уровня."""
+        for level in self.ZOOM_LEVELS:
+            if level > self.zoom + 1e-6:
+                self._set_zoom(level, anchor_screen=anchor)
+                return
+
+    def zoom_out(self, anchor: Optional[Tuple[int, int]] = None) -> None:
+        """Уменьшает зум до предыдущего уровня."""
+        for level in reversed(self.ZOOM_LEVELS):
+            if level < self.zoom - 1e-6:
+                self._set_zoom(level, anchor_screen=anchor)
+                return
+
+    # ===== Обработчики колеса мыши =====
+    def _on_mouse_wheel(self, event):
+        """Колесо мыши — вертикальный скролл."""
+        delta = int(-event.delta / 120) if event.delta else 0
+        if delta:
+            self.canvas.yview_scroll(delta, "units")
+        return "break"
+
+    def _on_shift_mouse_wheel(self, event):
+        """Shift+колесо — горизонтальный скролл."""
+        delta = int(-event.delta / 120) if event.delta else 0
+        if delta:
+            self.canvas.xview_scroll(delta, "units")
+        return "break"
+
+    def _on_ctrl_mouse_wheel(self, event):
+        """Ctrl+колесо — зум с шагом (якорь — точка под курсором)."""
+        anchor = (event.x, event.y)
+        if event.delta > 0:
+            self.zoom_in(anchor=anchor)
+        elif event.delta < 0:
+            self.zoom_out(anchor=anchor)
+        return "break"
 
     def show_grid_settings(self):
         """Показывает окно настроек сетки."""
@@ -275,7 +394,7 @@ class CanvasView:
 
     def setup_ui(self):
         """Настраивает пользовательский интерфейс."""
-        self.root.title("Редактор топологии сети")
+        self.root.title("Автоматизированная система построения цифровых карт безопасности")
 
         # Левая панель управления
         control_frame = ctk.CTkFrame(self.root)
@@ -312,13 +431,39 @@ class CanvasView:
         self.btn_scale = ctk.CTkButton(control_frame, text="Масштаб интерфейса", command=self.show_scale_settings)
         self.btn_scale.pack(fill=tk.X, pady=2)
 
-        # Правая область - холст
+        # Правая область - холст c прокруткой
         canvas_frame = ttk.Frame(self.root)
         canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(canvas_frame, bg="white", width=1000, height=700,
-                                scrollregion=(0, 0, 2000, 2000))
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Скроллбары
+        h_scroll = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
+        v_scroll = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+
+        self.canvas = tk.Canvas(
+            canvas_frame, bg="white", width=1000, height=700,
+            scrollregion=(0, 0, int(self.WORLD_WIDTH * self.zoom), int(self.WORLD_HEIGHT * self.zoom)),
+            xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set,
+            highlightthickness=0,
+        )
+
+        h_scroll.config(command=self.canvas.xview)
+        v_scroll.config(command=self.canvas.yview)
+
+        # Индикатор текущего зума в нижнем правом углу (над скроллбарами).
+        # Поверх холста, справа-снизу — всегда виден поверх рисунка.
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.zoom_label = tk.Label(
+            self.canvas,
+            text=f"{int(round(self.zoom * 100))}%",
+            bg="#ffffff", fg="#333333",
+            font=("Arial", 10, "bold"),
+            bd=1, relief=tk.SOLID, padx=6, pady=2
+        )
+        # place() относительно холста — всегда в правом нижнем углу видимой области
+        self.zoom_label.place(relx=1.0, rely=1.0, anchor="se", x=-6, y=-6)
 
         # Привязка событий
         self.canvas.bind("<Button-1>", self.on_canvas_click)
@@ -327,6 +472,13 @@ class CanvasView:
         self.canvas.bind("<Button-3>", self.on_canvas_right_click)
         self.canvas.bind("<Motion>", self.on_canvas_motion)
         self.canvas.bind("<Double-Button-1>", self.on_canvas_double_click)
+
+        # Навигация: колесо — вертикальный скролл; Shift+колесо — горизонтальный;
+        # Ctrl+колесо — зум. Фокус на холсте нужен, чтобы события ловились.
+        self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
+        self.canvas.bind("<Shift-MouseWheel>", self._on_shift_mouse_wheel)
+        self.canvas.bind("<Control-MouseWheel>", self._on_ctrl_mouse_wheel)
+        self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
 
         self.status_label = ttk.Label(control_frame, text="", font=("Arial", 9))
         self.status_label.pack(fill=tk.X, pady=(10, 0))
@@ -603,11 +755,16 @@ class CanvasView:
             messagebox.showerror("Ошибка", f"Неожиданная ошибка: {str(e)}")
 
     def on_canvas_click(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        self.canvas.focus_set()
+        x, y = self.canvas_event_world(event)
 
         if self.mode == "creating_zone":
-            self.creating_zone_start = (x, y)
-            self.creating_zone_rect = self.canvas.create_rectangle(x, y, x, y, outline="blue", dash=(2, 2), width=2)
+            sx = self.snap_to_grid(x)
+            sy = self.snap_to_grid(y)
+            self.creating_zone_start = (sx, sy)
+            self.creating_zone_rect = self.canvas.create_rectangle(
+                self.w2c(sx), self.w2c(sy), self.w2c(sx), self.w2c(sy),
+                outline="blue", dash=(2, 2), width=2)
             return
 
         if self.mode == "create_link":
@@ -661,20 +818,6 @@ class CanvasView:
         # Обычный режим
         node = self.find_node_at(x, y)
         if node:
-            corner = node.get_corner_at(x, y)
-            if corner:
-                self.resizing_node = True
-                self.resize_node = node
-                self.resize_node_corner = corner
-                self.resize_node_start = (x, y, node.position[0], node.position[1], node.size[0], node.size[1])
-                self.clear_temp_elements()
-                node_x, node_y = node.position
-                node_w, node_h = node.size
-                temp_rect = self.canvas.create_rectangle(node_x, node_y, node_x + node_w, node_y + node_h,
-                                                         outline="green", dash=(2, 2), width=2)
-                self.temp_elements.append(temp_rect)
-                return
-
             self.dragging = True
             self.drag_node = node
             self.selected_node_id = node.id
@@ -682,8 +825,10 @@ class CanvasView:
             node_x, node_y = node.position
             self.drag_offset = (x - node_x, y - node_y)
             self.clear_temp_elements()
-            temp_rect = self.canvas.create_rectangle(node_x, node_y, node_x + node.size[0], node_y + node.size[1],
-                                                     outline="blue", dash=(2, 2), width=2)
+            temp_rect = self.canvas.create_rectangle(
+                self.w2c(node_x), self.w2c(node_y),
+                self.w2c(node_x + node.size[0]), self.w2c(node_y + node.size[1]),
+                outline="blue", dash=(2, 2), width=2)
             self.temp_elements.append(temp_rect)
         else:
             zone = self.find_tim_zone_at(x, y)
@@ -697,8 +842,10 @@ class CanvasView:
                     self.resize_zone_corner = corner or edge
                     self.resize_zone_start = (x, y, zone.x, zone.y, zone.width, zone.height)
                     self.clear_temp_elements()
-                    temp_rect = self.canvas.create_rectangle(zone.x, zone.y, zone.x + zone.width, zone.y + zone.height,
-                                                             outline="orange", dash=(2, 2), width=2)
+                    temp_rect = self.canvas.create_rectangle(
+                        self.w2c(zone.x), self.w2c(zone.y),
+                        self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
+                        outline="orange", dash=(2, 2), width=2)
                     self.temp_elements.append(temp_rect)
                     self.selected_zone_id = zone.id
                 else:
@@ -708,8 +855,10 @@ class CanvasView:
                     center_x, center_y = zone.center()
                     self.drag_zone_offset = (x - center_x, y - center_y)
                     self.clear_temp_elements()
-                    temp_rect = self.canvas.create_rectangle(zone.x, zone.y, zone.x + zone.width, zone.y + zone.height,
-                                                             outline="purple", dash=(2, 2), width=2)
+                    temp_rect = self.canvas.create_rectangle(
+                        self.w2c(zone.x), self.w2c(zone.y),
+                        self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
+                        outline="purple", dash=(2, 2), width=2)
                     self.temp_elements.append(temp_rect)
             else:
                 self.selected_node_id = None
@@ -717,11 +866,15 @@ class CanvasView:
                 self.redraw()
 
     def on_canvas_drag(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self.canvas_event_world(event)
 
         if self.mode == "creating_zone" and self.creating_zone_start and self.creating_zone_rect:
             start_x, start_y = self.creating_zone_start
-            self.canvas.coords(self.creating_zone_rect, start_x, start_y, x, y)
+            snap_x = self.snap_to_grid(x)
+            snap_y = self.snap_to_grid(y)
+            self.canvas.coords(self.creating_zone_rect,
+                               self.w2c(start_x), self.w2c(start_y),
+                               self.w2c(snap_x), self.w2c(snap_y))
             return
 
         if self.dragging and self.drag_node:
@@ -732,59 +885,21 @@ class CanvasView:
                 new_x = max(zone.x, min(new_x, zone.x + zone.width - self.drag_node.size[0]))
                 new_y = max(zone.y, min(new_y, zone.y + zone.height - self.drag_node.size[1]))
             if self.temp_elements:
-                self.canvas.coords(self.temp_elements[0], new_x, new_y, new_x + self.drag_node.size[0],
-                                   new_y + self.drag_node.size[1])
-
-        elif self.resizing_node and self.resize_node and self.resize_node_start:
-            start_x, start_y, node_x, node_y, node_w, node_h = self.resize_node_start
-            dx = x - start_x
-            dy = y - start_y
-
-            new_w, new_h = node_w, node_h
-            new_x, new_y = node_x, node_y
-
-            if self.resize_node_corner == 'nw':
-                new_w = node_w - dx
-                new_h = node_h - dy
-                new_x = node_x + dx
-                new_y = node_y + dy
-            elif self.resize_node_corner == 'ne':
-                new_w = node_w + dx
-                new_h = node_h - dy
-                new_y = node_y + dy
-            elif self.resize_node_corner == 'sw':
-                new_w = node_w - dx
-                new_h = node_h + dy
-                new_x = node_x + dx
-            elif self.resize_node_corner == 'se':
-                new_w = node_w + dx
-                new_h = node_h + dy
-
-            new_w = max(20, new_w)
-            new_h = max(20, new_h)
-
-            zone = self.resize_node.zone
-            if zone:
-                if new_x < zone.x:
-                    new_x = zone.x
-                if new_y < zone.y:
-                    new_y = zone.y
-                if new_x + new_w > zone.x + zone.width:
-                    new_w = zone.x + zone.width - new_x
-                if new_y + new_h > zone.y + zone.height:
-                    new_h = zone.y + zone.height - new_y
-
-            if self.temp_elements:
-                self.canvas.coords(self.temp_elements[0], new_x, new_y, new_x + new_w, new_y + new_h)
+                self.canvas.coords(self.temp_elements[0],
+                                   self.w2c(new_x), self.w2c(new_y),
+                                   self.w2c(new_x + self.drag_node.size[0]),
+                                   self.w2c(new_y + self.drag_node.size[1]))
 
         elif self.dragging_zone and self.drag_zone:
             new_center_x = x - self.drag_zone_offset[0]
             new_center_y = y - self.drag_zone_offset[1]
-            new_x = new_center_x - self.drag_zone.width / 2.0
-            new_y = new_center_y - self.drag_zone.height / 2.0
+            new_x = self.snap_to_grid(new_center_x - self.drag_zone.width / 2.0)
+            new_y = self.snap_to_grid(new_center_y - self.drag_zone.height / 2.0)
             if self.temp_elements:
-                self.canvas.coords(self.temp_elements[0], new_x, new_y, new_x + self.drag_zone.width,
-                                   new_y + self.drag_zone.height)
+                self.canvas.coords(self.temp_elements[0],
+                                   self.w2c(new_x), self.w2c(new_y),
+                                   self.w2c(new_x + self.drag_zone.width),
+                                   self.w2c(new_y + self.drag_zone.height))
 
         elif self.resizing_zone and self.resize_zone and self.resize_zone_start:
             start_x, start_y, zone_x, zone_y, zone_w, zone_h = self.resize_zone_start
@@ -813,18 +928,28 @@ class CanvasView:
             new_w = max(100, new_w)
             new_h = max(100, new_h)
 
+            # Привязка к размерной сетке
+            new_x = self.snap_to_grid(new_x)
+            new_y = self.snap_to_grid(new_y)
+            new_w = self.snap_size_to_grid(new_w)
+            new_h = self.snap_size_to_grid(new_h)
+
             if self.temp_elements:
-                self.canvas.coords(self.temp_elements[0], new_x, new_y, new_x + new_w, new_y + new_h)
+                self.canvas.coords(self.temp_elements[0],
+                                   self.w2c(new_x), self.w2c(new_y),
+                                   self.w2c(new_x + new_w), self.w2c(new_y + new_h))
 
     def on_canvas_release(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self.canvas_event_world(event)
 
         if self.mode == "creating_zone" and self.creating_zone_start and self.creating_zone_rect:
             start_x, start_y = self.creating_zone_start
-            zone_x = min(start_x, x)
-            zone_y = min(start_y, y)
-            zone_width = abs(x - start_x)
-            zone_height = abs(y - start_y)
+            end_x = self.snap_to_grid(x)
+            end_y = self.snap_to_grid(y)
+            zone_x = min(start_x, end_x)
+            zone_y = min(start_y, end_y)
+            zone_width = self.snap_size_to_grid(abs(end_x - start_x))
+            zone_height = self.snap_size_to_grid(abs(end_y - start_y))
 
             self.canvas.delete(self.creating_zone_rect)
             self.creating_zone_rect = None
@@ -879,59 +1004,11 @@ class CanvasView:
             self.dragging = False
             self.drag_node = None
 
-        elif self.resizing_node and self.resize_node:
-            if self.resize_node_start:
-                start_x, start_y, node_x, node_y, node_w, node_h = self.resize_node_start
-                dx = x - start_x
-                dy = y - start_y
-
-                new_w, new_h = node_w, node_h
-                new_x, new_y = node_x, node_y
-
-                if self.resize_node_corner == 'nw':
-                    new_w = node_w - dx
-                    new_h = node_h - dy
-                    new_x = node_x + dx
-                    new_y = node_y + dy
-                elif self.resize_node_corner == 'ne':
-                    new_w = node_w + dx
-                    new_h = node_h - dy
-                    new_y = node_y + dy
-                elif self.resize_node_corner == 'sw':
-                    new_w = node_w - dx
-                    new_h = node_h + dy
-                    new_x = node_x + dx
-                elif self.resize_node_corner == 'se':
-                    new_w = node_w + dx
-                    new_h = node_h + dy
-
-                new_w = max(20, new_w)
-                new_h = max(20, new_h)
-
-                zone = self.resize_node.zone
-                if zone:
-                    if new_x < zone.x:
-                        new_x = zone.x
-                    if new_y < zone.y:
-                        new_y = zone.y
-                    if new_x + new_w > zone.x + zone.width:
-                        new_w = zone.x + zone.width - new_x
-                    if new_y + new_h > zone.y + zone.height:
-                        new_h = zone.y + zone.height - new_y
-
-                self.resize_node.position = (new_x, new_y)
-                self.resize_node.size = (new_w, new_h)
-                self.clear_icon_bounds_cache(self.resize_node.id)
-                self.clear_temp_elements()
-                self.redraw()
-            self.resizing_node = False
-            self.resize_node = None
-
         elif self.dragging_zone and self.drag_zone:
             new_center_x = x - self.drag_zone_offset[0]
             new_center_y = y - self.drag_zone_offset[1]
-            new_x = new_center_x - self.drag_zone.width / 2.0
-            new_y = new_center_y - self.drag_zone.height / 2.0
+            new_x = self.snap_to_grid(new_center_x - self.drag_zone.width / 2.0)
+            new_y = self.snap_to_grid(new_center_y - self.drag_zone.height / 2.0)
             self.board.move_zone(self.drag_zone.id, new_x, new_y)
             self.clear_temp_elements()
             self.redraw()
@@ -966,6 +1043,12 @@ class CanvasView:
                 new_w = max(100, new_w)
                 new_h = max(100, new_h)
 
+                # Привязка итоговых координат и размеров к размерной сетке
+                new_x = self.snap_to_grid(new_x)
+                new_y = self.snap_to_grid(new_y)
+                new_w = self.snap_size_to_grid(new_w)
+                new_h = self.snap_size_to_grid(new_h)
+
                 self.board.resize_zone(self.resize_zone.id, new_x, new_y, new_w, new_h)
                 self.clear_temp_elements()
                 self.redraw()
@@ -973,7 +1056,7 @@ class CanvasView:
             self.resize_zone = None
 
     def on_canvas_right_click(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self.canvas_event_world(event)
 
         node = self.find_node_at(x, y)
         if node:
@@ -989,7 +1072,7 @@ class CanvasView:
             ZoneContextMenuHandler.show_menu(event, self, zone)
 
     def on_canvas_motion(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self.canvas_event_world(event)
 
         if self.mode == "creating_zone":
             self.canvas.config(cursor="cross")
@@ -1020,7 +1103,7 @@ class CanvasView:
                     self.canvas.config(cursor="")
 
     def on_canvas_double_click(self, event):
-        x, y = self.canvas.canvasx(event.x), self.canvas.canvasy(event.y)
+        x, y = self.canvas_event_world(event)
         zone = self.find_tim_zone_at(x, y)
         if zone:
             self.edit_zone_description(zone)
@@ -1029,8 +1112,10 @@ class CanvasView:
         x, y = node.position
         w, h = node.size
         self.clear_temp_elements()
-        temp_rect = self.canvas.create_rectangle(x - 2, y - 2, x + w + 2, y + h + 2, outline="blue", width=3,
-                                                 dash=(5, 3))
+        temp_rect = self.canvas.create_rectangle(
+            self.w2c(x - 2), self.w2c(y - 2),
+            self.w2c(x + w + 2), self.w2c(y + h + 2),
+            outline="blue", width=3, dash=(5, 3))
         self.temp_elements.append(temp_rect)
 
     def find_node_at(self, x: float, y: float) -> Optional[Node]:
@@ -1116,12 +1201,14 @@ class CanvasView:
             messagebox.showerror("Ошибка", f"Не удалось открыть паспорт: {str(e)}")
 
     def open_firewall(self, node: Node = None):
+        import copy as _copy
         if node is None and self.selected_node_id:
             node = self.board.find_node(self.selected_node_id)
         if node:
             try:
                 if "firewall" in node.properties:
-                    firewall_data = node.properties["firewall"]
+                    # Передаём диалогу КОПИЮ данных, чтобы отмена не мутировала оригинал
+                    firewall_data = _copy.deepcopy(node.properties["firewall"])
 
                     class SimpleFirewallManager:
                         def __init__(self, data):
@@ -1179,16 +1266,25 @@ class CanvasView:
                                     "notification_enabled": self.notification_enabled}
 
                     firewall_manager = SimpleFirewallManager(firewall_data)
+                    had_firewall = True
                 else:
                     from models.firewall import FirewallManager
                     firewall_manager = FirewallManager(node.id)
-                    node.properties["firewall"] = firewall_manager.to_dict()
+                    had_firewall = False
 
                 dialog = FirewallDialog(self.root, node, firewall_manager)
                 self.root.wait_window(dialog.dialog)
-                node.properties["firewall"] = firewall_manager.to_dict()
-                node.firewall_enabled = firewall_manager.firewall_enabled
-                self.redraw()
+
+                # Применяем изменения ТОЛЬКО если пользователь нажал «Сохранить».
+                # Закрытие крестиком / «Отмена» — изменения отбрасываются.
+                if getattr(dialog, "saved", False):
+                    node.properties["firewall"] = firewall_manager.to_dict()
+                    node.firewall_enabled = firewall_manager.firewall_enabled
+                    self.redraw()
+                elif not had_firewall:
+                    # Для нового узла, если пользователь отменил — не оставляем
+                    # пустой заготовки в properties.
+                    node.properties.pop("firewall", None)
             except Exception as e:
                 messagebox.showerror("Ошибка", f"Не удалось открыть настройки файервола: {str(e)}")
         else:
@@ -1221,26 +1317,14 @@ class CanvasView:
         PropertiesDialog(self.root, zone.name, zone, "Зона TIM")
         self.redraw()
 
-    def start_node_resize(self, node: Optional[Node] = None):
-        if node is None and self.selected_node_id:
-            node = self.board.find_node(self.selected_node_id)
-        if node:
-            self.resizing_node = True
-            self.resize_node = node
-            self.clear_temp_elements()
-            node_x, node_y = node.position
-            node_w, node_h = node.size
-            temp_rect = self.canvas.create_rectangle(node_x, node_y, node_x + node_w, node_y + node_h, outline="green",
-                                                     dash=(2, 2), width=2)
-            self.temp_elements.append(temp_rect)
-            self.redraw()
-
     def start_zone_resize(self, zone: Zone):
         self.resizing_zone = True
         self.resize_zone = zone
         self.clear_temp_elements()
-        temp_rect = self.canvas.create_rectangle(zone.x, zone.y, zone.x + zone.width, zone.y + zone.height,
-                                                 outline="orange", dash=(2, 2), width=2)
+        temp_rect = self.canvas.create_rectangle(
+            self.w2c(zone.x), self.w2c(zone.y),
+            self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
+            outline="orange", dash=(2, 2), width=2)
         self.temp_elements.append(temp_rect)
         self.redraw()
 
@@ -1287,30 +1371,44 @@ class CanvasView:
     def redraw(self):
         self.canvas.delete("all")
 
-        # Рисуем зоны TIM
+        z_scale = self.zoom
+
+        # Рисуем зоны TIM (без подсветки выбранной и без уголков ресайза)
         for z in self.board.get_tim_zones():
-            x1, y1, x2, y2 = z.to_canvas()
-            fill_color = "#e8f4f8" if z.id == self.selected_zone_id else "#f0f0f0"
-            self.canvas.create_rectangle(x1, y1, x2, y2, outline="black", fill=fill_color, width=2)
+            wx1, wy1, wx2, wy2 = z.to_canvas()
+            x1, y1, x2, y2 = self.w2c(wx1), self.w2c(wy1), self.w2c(wx2), self.w2c(wy2)
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline="black", fill="#f0f0f0", width=2)
 
+            # Названия зон в мировых размерах (пропорционально самой зоне)
             main_text = z.get_display_text()
-            self.canvas.create_text((x1 + x2) / 2, y1 + 15, text=main_text, fill="#333333", font=("Arial", 12, "bold"),
-                                    anchor="center")
-            if z.name:
-                self.canvas.create_text((x1 + x2) / 2, y1 + 35, text=z.name, fill="black", font=("Arial", 10),
-                                        anchor="center")
-            if z.description:
-                y_offset = 55 if z.name else 35
-                self.canvas.create_text((x1 + x2) / 2, y1 + y_offset, text=z.description, fill="#333333",
-                                        font=("Arial", 8), anchor="center")
-            self.canvas.create_text(x2 - 5, y2 - 5, text=f"{int(z.width)}x{int(z.height)}", fill="gray",
-                                    font=("Arial", 8), anchor="se")
+            # Базовый размер шрифта зависит от высоты зоны (мировой),
+            # далее конвертируется в экранные пиксели через зум.
+            base_title = max(10, min(28, int(round(z.height * 0.05))))
+            base_sub = max(8, min(20, int(round(z.height * 0.035))))
+            base_desc = max(7, min(16, int(round(z.height * 0.028))))
 
-            if z.id == self.selected_zone_id:
-                corners = [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]
-                for cx, cy in corners:
-                    self.canvas.create_rectangle(cx - 5, cy - 5, cx + 5, cy + 5, fill="orange", outline="black",
-                                                 width=1)
+            title_y_world = 15 + base_title / 2
+            self.canvas.create_text(
+                (x1 + x2) / 2, y1 + title_y_world * z_scale,
+                text=main_text, fill="#333333",
+                font=self.font_scaled(base_title, "bold"), anchor="center")
+
+            if z.name:
+                sub_y_world = title_y_world + base_title + 4
+                self.canvas.create_text(
+                    (x1 + x2) / 2, y1 + sub_y_world * z_scale,
+                    text=z.name, fill="black",
+                    font=self.font_scaled(base_sub), anchor="center")
+
+            if z.description:
+                if z.name:
+                    desc_y_world = sub_y_world + base_sub + 4
+                else:
+                    desc_y_world = title_y_world + base_title + 4
+                self.canvas.create_text(
+                    (x1 + x2) / 2, y1 + desc_y_world * z_scale,
+                    text=z.description, fill="#333333",
+                    font=self.font_scaled(base_desc), anchor="center")
 
         # Рисуем соединения
         # Подсчитываем количество линий на каждой стороне каждого узла для разведения
@@ -1357,18 +1455,26 @@ class CanvasView:
 
                 # Единый стиль для всех соединений (без стрелок — трафик двунаправленный)
                 line_color = "#4CAF50"
-                line_width = 2
+                line_width = max(1, int(round(2 * z_scale)))
 
                 for i in range(len(line_points) - 1):
-                    self.canvas.create_line(line_points[i][0], line_points[i][1], line_points[i + 1][0],
-                                            line_points[i + 1][1], fill=line_color, width=line_width)
+                    self.canvas.create_line(
+                        self.w2c(line_points[i][0]), self.w2c(line_points[i][1]),
+                        self.w2c(line_points[i + 1][0]), self.w2c(line_points[i + 1][1]),
+                        fill=line_color, width=line_width)
             except Exception as e:
                 print(f"Ошибка отрисовки соединения: {e}")
 
         # Рисуем узлы
+        self._icon_refs = []  # сбрасываем кеш ImageTk, чтобы они пересоздавались под текущий зум
         for n in self.board.nodes:
-            x, y = n.position
-            w, h = n.size
+            wx, wy = n.position
+            ww, wh = n.size
+            # Экранные координаты/размер = мировые × зум
+            x = self.w2c(wx)
+            y = self.w2c(wy)
+            w = ww * z_scale
+            h = wh * z_scale
             outline_color = "red" if n.id == self.selected_node_id else "black"
             outline_width = 3 if n.id == self.selected_node_id else 2
 
@@ -1376,15 +1482,13 @@ class CanvasView:
             if icon:
                 try:
                     img = icon.copy()
-                    img = img.resize((int(w), int(h)), Image.Resampling.LANCZOS)
+                    img = img.resize((max(1, int(w)), max(1, int(h))), Image.Resampling.LANCZOS)
                     icon_tk = ImageTk.PhotoImage(img)
-                    if not hasattr(self, '_icon_refs'):
-                        self._icon_refs = []
                     self._icon_refs.append(icon_tk)
                     self.canvas.create_image(x + w / 2, y + h / 2, image=icon_tk)
                     if n.id == self.selected_node_id:
                         self.canvas.create_rectangle(x, y, x + w, y + h, outline="red", width=3, dash=(3, 3))
-                except Exception as e:
+                except Exception:
                     color = self.NODE_COLORS.get(n.type, "#999999")
                     self.canvas.create_rectangle(x, y, x + w, y + h, fill=color, outline=outline_color,
                                                  width=outline_width)
@@ -1392,17 +1496,18 @@ class CanvasView:
                 color = self.NODE_COLORS.get(n.type, "#999999")
                 self.canvas.create_rectangle(x, y, x + w, y + h, fill=color, outline=outline_color, width=outline_width)
 
-            self.canvas.create_text(x + w / 2, y + h + 5, text=n.name, anchor="n", fill="black", font=("Arial", 9))
+            self.canvas.create_text(x + w / 2, y + h + 5 * z_scale, text=n.name, anchor="n", fill="black",
+                                    font=self.font_scaled(9))
 
             # Индикаторы статуса
-            led_x = x + w - 8
-            led_y = y + 8
-            led_radius = 5
+            led_x = x + w - 8 * z_scale
+            led_y = y + 8 * z_scale
+            led_radius = max(2, int(round(5 * z_scale)))
 
             if n.vpn_client_enabled or n.vpn_server_enabled:
                 self.canvas.create_oval(led_x - led_radius, led_y - led_radius, led_x + led_radius, led_y + led_radius,
                                         fill="#4CAF50", outline="#2E7D32", width=1)
-                led_x -= 14
+                led_x -= 14 * z_scale
 
             if n.firewall_enabled:
                 self.canvas.create_oval(led_x - led_radius, led_y - led_radius, led_x + led_radius, led_y + led_radius,

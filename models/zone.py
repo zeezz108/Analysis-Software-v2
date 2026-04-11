@@ -233,8 +233,8 @@ class Board:
             description="Для размещения Интернет-узлов",
             x=0,
             y=0,
-            width=2000,
-            height=2000,
+            width=4000,
+            height=3000,
             zone_type="free"
         )
         if not any(z.id == "free_zone" for z in self.zones):
@@ -462,37 +462,6 @@ class Board:
 
         return False
 
-    def _generate_routes_for_node(self, node: 'Node'):
-        """Генерирует маршруты для узла на основе его портов."""
-        if not hasattr(node, 'routing_table'):
-            node.routing_table = []
-
-        # Очищаем старые прямые маршруты (оставляем только маршруты по умолчанию и статические)
-        node.routing_table = [r for r in node.routing_table if r.get("gateway") != "0.0.0.0"]
-
-        # Добавляем прямые маршруты для каждого порта с IP
-        for port in node.ports:
-            ip = port.get("ip_address", "")
-            mask = port.get("subnet_mask", "")
-            port_name = port.get("name", "")
-
-            if ip and mask:
-                from utils.network_utils import calculate_network
-                from models.route import Route
-
-                network = calculate_network(ip, mask)
-
-                # Проверяем, нет ли уже такого маршрута
-                exists = False
-                for r in node.routing_table:
-                    if r.get("destination") == network and r.get("gateway") == "0.0.0.0":
-                        exists = True
-                        break
-
-                if not exists:
-                    route = Route.create_connected_route(network, mask, port_name, 1)
-                    node.routing_table.append(route.to_dict())
-
     def add_link(self, a_id: str, b_id: str, connection_info: Dict[str, Any]) -> Optional['Link']:
         """
         Добавляет соединение между узлами.
@@ -611,10 +580,6 @@ class Board:
 
         self.links.append(link)
         link.update_ports_connection() if not link.is_wifi else link.update_wifi_connection()
-
-        # Генерация маршрутов
-        self._generate_routes_for_node(a)
-        self._generate_routes_for_node(b)
 
         return link
 

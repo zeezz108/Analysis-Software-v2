@@ -8,7 +8,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING  # noqa: F401
 
 from utils.generators import uid
 
@@ -204,220 +204,323 @@ class Link:
 
     def get_bezier_coords(self, canvas_view, link_index: int = 0, total_links_on_side: int = 1) -> List[float]:
         """
-        Рассчитывает координаты для отрисовки ортогональной линии с обходом препятствий.
+        Рассчитывает координаты для отрисовки ортогональной линии.
+
+        Путь строится только из сегментов под углом 90°.
+        При наличии препятствий маршрут обходит их дополнительными поворотами
+        под 90°, никогда не переходя в диагональ. Стремится к минимальному
+        количеству углов и симметричному рисунку для симметричных расстановок.
 
         Args:
             canvas_view: Экземпляр CanvasView (нужен для получения границ иконок)
-            link_index: Индекс этой линии среди линий на той же стороне узла (для разведения)
+            link_index: Индекс этой линии среди линий на той же стороне узла
             total_links_on_side: Общее количество линий, выходящих с той же стороны
 
         Returns:
-            Список координат: [x1,y1, x2,y2, ..., dummy*6]
-            (последние 6 значений — заглушка для обратной совместимости)
+            Плоский список координат: [x1,y1, x2,y2, ...] + 6 дублей последней
+            точки для обратной совместимости со старым кодом отрисовки.
         """
-        # Получаем границы иконок узлов
         a_bounds = canvas_view.get_icon_bounds(self.a)
         b_bounds = canvas_view.get_icon_bounds(self.b)
 
-        # Центры узлов
-        cx_a = a_bounds[0] + a_bounds[2] / 2
-        cy_a = a_bounds[1] + a_bounds[3] / 2
-        cx_b = b_bounds[0] + b_bounds[2] / 2
-        cy_b = b_bounds[1] + b_bounds[3] / 2
+        ax, ay, aw, ah = a_bounds
+        bx, by, bw, bh = b_bounds
+        cx_a, cy_a = ax + aw / 2.0, ay + ah / 2.0
+        cx_b, cy_b = bx + bw / 2.0, by + bh / 2.0
 
         dx = cx_b - cx_a
         dy = cy_b - cy_a
 
-        # Определяем стороны выхода/входа
-        if abs(dx) > abs(dy):
-            if dx > 0:
-                a_side, b_side = "right", "left"
-            else:
-                a_side, b_side = "left", "right"
+        # Стороны выхода/входа по доминирующей оси (детерминированно — для симметрии)
+        if abs(dx) >= abs(dy):
+            a_side = "right" if dx >= 0 else "left"
+            b_side = "left" if dx >= 0 else "right"
         else:
-            if dy > 0:
-                a_side, b_side = "bottom", "top"
-            else:
-                a_side, b_side = "top", "bottom"
+            a_side = "bottom" if dy >= 0 else "top"
+            b_side = "top" if dy >= 0 else "bottom"
 
-        def get_edge_point(bounds, side, offset_ratio=0.5):
-            """Точка на краю иконки. offset_ratio=0.5 — середина стороны."""
-            bx, by, bw, bh = bounds
-            if side == "right":
-                return (bx + bw, by + bh * offset_ratio)
-            elif side == "left":
-                return (bx, by + bh * offset_ratio)
-            elif side == "bottom":
-                return (bx + bw * offset_ratio, by + bh)
-            else:  # top
-                return (bx + bw * offset_ratio, by)
-
-        def get_direction(side):
-            dirs = {"right": (1, 0), "left": (-1, 0), "bottom": (0, 1), "top": (0, -1)}
-            return dirs[side]
-
-        # Смещение точки подключения для разведения нескольких линий на одной стороне
+        # Разведение параллельных линий на одной стороне узла
         if total_links_on_side > 1:
             spacing = 0.6 / total_links_on_side
-            ratio_a = 0.2 + spacing * (link_index + 0.5)
-            ratio_b = 0.2 + spacing * (link_index + 0.5)
+            ratio = 0.2 + spacing * (link_index + 0.5)
         else:
-            ratio_a = 0.5
-            ratio_b = 0.5
+            ratio = 0.5
 
-        a_point = get_edge_point(a_bounds, a_side, ratio_a)
-        b_point = get_edge_point(b_bounds, b_side, ratio_b)
-        a_dir = get_direction(a_side)
-        b_dir = get_direction(b_side)
+        def edge_point(bounds, side, r):
+            bx_, by_, bw_, bh_ = bounds
+            if side == "right":
+                return (bx_ + bw_, by_ + bh_ * r)
+            if side == "left":
+                return (bx_, by_ + bh_ * r)
+            if side == "bottom":
+                return (bx_ + bw_ * r, by_ + bh_)
+            return (bx_ + bw_ * r, by_)
 
-        # Небольшой отступ от края иконки для первого «колена»
+        def dir_of(side):
+            return {"right": (1, 0), "left": (-1, 0),
+                    "bottom": (0, 1), "top": (0, -1)}[side]
+
+        a_pt = edge_point(a_bounds, a_side, ratio)
+        b_pt = edge_point(b_bounds, b_side, ratio)
+        a_dir = dir_of(a_side)
+        b_dir = dir_of(b_side)
+
         stub = 10
-        a_start = (a_point[0] + a_dir[0] * stub, a_point[1] + a_dir[1] * stub)
-        b_end = (b_point[0] + b_dir[0] * stub, b_point[1] + b_dir[1] * stub)
+        a1 = (a_pt[0] + a_dir[0] * stub, a_pt[1] + a_dir[1] * stub)
+        b1 = (b_pt[0] + b_dir[0] * stub, b_pt[1] + b_dir[1] * stub)
 
-        # Строим ортогональный путь: A_edge -> a_start -> промежуточные -> b_end -> B_edge
-        points = [a_point, a_start]
+        horizontal_exit = a_dir[0] != 0  # линия выходит по горизонтали
 
-        is_horizontal = a_dir[0] != 0  # линия выходит горизонтально
+        # Равномерное смещение для параллельных линий — сохраняет симметрию
+        spread = 0.0
+        if total_links_on_side > 1:
+            spread = (link_index - (total_links_on_side - 1) / 2.0) * 12.0
 
-        if is_horizontal:
-            if a_start[1] != b_end[1]:
-                mid_x = (a_start[0] + b_end[0]) / 2
-                # Разведение параллельных линий: смещаем среднюю точку
-                spread = (link_index - (total_links_on_side - 1) / 2) * 12
-                mid_x += spread if total_links_on_side > 1 else 0
-                points.append((mid_x, a_start[1]))
-                points.append((mid_x, b_end[1]))
+        # Базовый путь: Z-образный (2 поворота) либо прямая (0 поворотов)
+        middle: List[Tuple[float, float]] = []
+        if horizontal_exit:
+            if abs(a1[1] - b1[1]) < 0.5:
+                # a1 и b1 на одной горизонтали — прямой путь
+                pass
+            else:
+                mid_x = (a1[0] + b1[0]) / 2.0 + spread
+                middle.append((mid_x, a1[1]))
+                middle.append((mid_x, b1[1]))
         else:
-            if a_start[0] != b_end[0]:
-                mid_y = (a_start[1] + b_end[1]) / 2
-                spread = (link_index - (total_links_on_side - 1) / 2) * 12
-                mid_y += spread if total_links_on_side > 1 else 0
-                points.append((a_start[0], mid_y))
-                points.append((b_end[0], mid_y))
+            if abs(a1[0] - b1[0]) < 0.5:
+                pass
+            else:
+                mid_y = (a1[1] + b1[1]) / 2.0 + spread
+                middle.append((a1[0], mid_y))
+                middle.append((b1[0], mid_y))
 
-        points.append(b_end)
-        points.append(b_point)
+        points: List[Tuple[float, float]] = [a_pt, a1] + middle + [b1, b_pt]
 
-        # Обход препятствий: проверяем, пересекает ли путь иконки других узлов
-        # Только для серединных сегментов (не от/к иконкам A и B)
-        obstacle_bounds = []
-        margin = 3  # минимальный отступ от иконки
-        if hasattr(canvas_view, 'board') and len(points) > 4:
+        # Собираем препятствия (иконки других узлов)
+        obstacles: List[Tuple[float, float, float, float]] = []
+        margin = 4
+        if hasattr(canvas_view, "board"):
             for node in canvas_view.board.nodes:
                 if node.id == self.a.id or node.id == self.b.id:
                     continue
                 nb = canvas_view.get_icon_bounds(node)
-                obstacle_bounds.append((
+                obstacles.append((
                     nb[0] - margin, nb[1] - margin,
                     nb[0] + nb[2] + margin, nb[1] + nb[3] + margin
                 ))
 
-        if obstacle_bounds:
-            # Проверяем только серединные сегменты (2..len-3), не трогаем выход/вход
-            mid_start = 2
-            mid_end = len(points) - 2
-            needs_avoidance = False
-            for i in range(mid_start, mid_end):
-                if i < len(points) - 1:
-                    for obs in obstacle_bounds:
-                        if self._segment_intersects_rect(points[i], points[i + 1], obs):
-                            needs_avoidance = True
-                            break
-                if needs_avoidance:
-                    break
-            if needs_avoidance:
-                points = self._avoid_obstacles(points, obstacle_bounds)
+        if obstacles:
+            points = self._route_around_obstacles(points, obstacles, horizontal_exit)
 
-        # Плоский список координат
-        flat_points = []
-        for point in points:
-            flat_points.extend([point[0], point[1]])
-
-        # Заглушка для обратной совместимости (6 значений)
-        last = points[-1] if points else (0, 0)
-        flat_points += [last[0], last[1], last[0], last[1], last[0], last[1]]
-
-        return flat_points
+        # Плоский список координат + 6 дублей последней точки (совместимость)
+        flat: List[float] = []
+        for p in points:
+            flat.extend([p[0], p[1]])
+        last = points[-1] if points else (0.0, 0.0)
+        flat += [last[0], last[1], last[0], last[1], last[0], last[1]]
+        return flat
 
     @staticmethod
     def _segment_intersects_rect(p1: Tuple[float, float], p2: Tuple[float, float],
                                   rect: Tuple[float, float, float, float]) -> bool:
-        """Проверяет, пересекает ли отрезок (p1->p2) прямоугольник (x1,y1,x2,y2)."""
+        """Проверяет пересечение ортогонального отрезка p1->p2 с прямоугольником rect."""
         rx1, ry1, rx2, ry2 = rect
         x1, y1 = p1
         x2, y2 = p2
 
-        # Проверяем горизонтальный отрезок
-        if y1 == y2:
-            if ry1 <= y1 <= ry2:
+        # Горизонтальный отрезок
+        if abs(y1 - y2) < 0.5:
+            if ry1 < y1 < ry2:
                 seg_min_x = min(x1, x2)
                 seg_max_x = max(x1, x2)
-                if seg_min_x < rx2 and seg_max_x > rx1:
-                    return True
+                return seg_min_x < rx2 and seg_max_x > rx1
             return False
 
-        # Проверяем вертикальный отрезок
-        if x1 == x2:
-            if rx1 <= x1 <= rx2:
+        # Вертикальный отрезок
+        if abs(x1 - x2) < 0.5:
+            if rx1 < x1 < rx2:
                 seg_min_y = min(y1, y2)
                 seg_max_y = max(y1, y2)
-                if seg_min_y < ry2 and seg_max_y > ry1:
-                    return True
+                return seg_min_y < ry2 and seg_max_y > ry1
             return False
 
         return False
 
-    def _avoid_obstacles(self, points: List[Tuple[float, float]],
-                          obstacles: List[Tuple[float, float, float, float]]) -> List[Tuple[float, float]]:
-        """Корректирует серединные сегменты пути, чтобы обойти иконки узлов.
+    def _any_intersects(self, p1: Tuple[float, float], p2: Tuple[float, float],
+                        obstacles: List[Tuple[float, float, float, float]]) -> bool:
+        return any(self._segment_intersects_rect(p1, p2, o) for o in obstacles)
 
-        Сдвигает среднюю линию выше/ниже/левее/правее если она проходит через иконку.
-        Не добавляет лишних точек — только сдвигает существующие.
+    def _route_around_obstacles(self,
+                                 points: List[Tuple[float, float]],
+                                 obstacles: List[Tuple[float, float, float, float]],
+                                 horizontal_exit: bool) -> List[Tuple[float, float]]:
+        """Корректирует серединные сегменты пути, обходя препятствия.
+
+        Сохраняет точки-заглушки (первый/последний индекс и их стубы),
+        а также строго ортогональность: при сдвиге серединного сегмента
+        двигает одинаковую координату обоих его концов, не затрагивая
+        соседние сегменты (они продолжают быть горизонтальными/вертикальными).
         """
         result = list(points)
 
-        # Проверяем каждый сегмент (кроме первых двух и последних двух — выход/вход)
-        for i in range(2, len(result) - 2):
-            if i >= len(result) - 1:
-                break
-            p1 = result[i]
-            p2 = result[i + 1]
+        # --- Случай 1: Z-образный путь (6 точек, 2 поворота) ---
+        if len(result) == 6:
+            # Серединный сегмент: result[2] <-> result[3]
+            a1 = result[1]
+            b1 = result[4]
+            mid1 = result[2]
+            mid2 = result[3]
 
-            for obs in obstacles:
-                if not self._segment_intersects_rect(p1, p2, obs):
-                    continue
+            # Проверяем все три средних сегмента
+            seg1 = (a1, mid1)       # горизонт. при horizontal_exit, верт. иначе
+            seg_mid = (mid1, mid2)  # вертикаль при horizontal_exit, горизонт. иначе
+            seg2 = (mid2, b1)       # горизонт. при horizontal_exit, верт. иначе
 
-                rx1, ry1, rx2, ry2 = obs
+            blocked_mid = self._any_intersects(*seg_mid, obstacles)
+            blocked_seg1 = self._any_intersects(*seg1, obstacles)
+            blocked_seg2 = self._any_intersects(*seg2, obstacles)
 
-                if p1[1] == p2[1]:
-                    # Горизонтальный сегмент — сдвигаем по Y
-                    dist_top = abs(p1[1] - ry1)
-                    dist_bottom = abs(p1[1] - ry2)
-                    if dist_top <= dist_bottom:
-                        new_y = ry1 - 5
-                    else:
-                        new_y = ry2 + 5
-                    result[i] = (p1[0], new_y)
-                    result[i + 1] = (p2[0], new_y)
-                    # Обновляем соседние вертикальные сегменты
-                    if i > 0:
-                        result[i - 1] = (result[i - 1][0], result[i - 1][1])  # не меняем
-                    break
+            if blocked_mid and not blocked_seg1 and not blocked_seg2:
+                # Сдвигаем середину Z, сохраняя ортогональность соседних сегментов
+                if horizontal_exit:
+                    # Серединный сегмент вертикальный: ищем свободный X
+                    new_x = self._find_clear_mid(
+                        axis="x",
+                        seg_start=mid1, seg_end=mid2,
+                        neighbors=[(a1, None), (b1, None)],
+                        obstacles=obstacles,
+                        original=mid1[0]
+                    )
+                    if new_x is not None:
+                        result[2] = (new_x, mid1[1])
+                        result[3] = (new_x, mid2[1])
+                else:
+                    # Серединный сегмент горизонтальный: ищем свободный Y
+                    new_y = self._find_clear_mid(
+                        axis="y",
+                        seg_start=mid1, seg_end=mid2,
+                        neighbors=[(a1, None), (b1, None)],
+                        obstacles=obstacles,
+                        original=mid1[1]
+                    )
+                    if new_y is not None:
+                        result[2] = (mid1[0], new_y)
+                        result[3] = (mid2[0], new_y)
+                return result
 
-                elif p1[0] == p2[0]:
-                    # Вертикальный сегмент — сдвигаем по X
-                    dist_left = abs(p1[0] - rx1)
-                    dist_right = abs(p1[0] - rx2)
-                    if dist_left <= dist_right:
-                        new_x = rx1 - 5
-                    else:
-                        new_x = rx2 + 5
-                    result[i] = (new_x, p1[1])
-                    result[i + 1] = (new_x, p2[1])
-                    break
+            if blocked_seg1 or blocked_seg2 or blocked_mid:
+                # Сложный случай — пробуем U-образный обход через дополнительные повороты
+                detoured = self._build_detour(result[0], result[1], result[4], result[5],
+                                                obstacles, horizontal_exit)
+                if detoured is not None:
+                    return detoured
+                # Не удалось — возвращаем как есть (всё равно 90°)
+                return result
+
+        # --- Случай 2: прямой путь (4 точки, 0 поворотов) ---
+        if len(result) == 4:
+            a1 = result[1]
+            b1 = result[2]
+            if self._any_intersects(a1, b1, obstacles):
+                detoured = self._build_detour(result[0], a1, b1, result[3], obstacles, horizontal_exit)
+                if detoured is not None:
+                    return detoured
 
         return result
+
+    def _find_clear_mid(self, axis: str,
+                        seg_start: Tuple[float, float],
+                        seg_end: Tuple[float, float],
+                        neighbors: List[Tuple[Tuple[float, float], Any]],
+                        obstacles: List[Tuple[float, float, float, float]],
+                        original: float) -> Optional[float]:
+        """Подбирает координату для сдвига серединного сегмента,
+        минимизируя смещение и сохраняя ортогональность.
+        """
+        # Кандидаты: обойти каждое препятствие слева/справа (или сверху/снизу)
+        candidates = [original]
+        pad = 8
+        for rx1, ry1, rx2, ry2 in obstacles:
+            if axis == "x":
+                candidates.append(rx1 - pad)
+                candidates.append(rx2 + pad)
+            else:
+                candidates.append(ry1 - pad)
+                candidates.append(ry2 + pad)
+
+        # Сортируем по расстоянию от исходной координаты — ближайший подходящий
+        candidates.sort(key=lambda v: abs(v - original))
+
+        for v in candidates:
+            if axis == "x":
+                new_mid1 = (v, seg_start[1])
+                new_mid2 = (v, seg_end[1])
+            else:
+                new_mid1 = (seg_start[0], v)
+                new_mid2 = (seg_end[0], v)
+
+            # Проверяем серединный сегмент
+            if self._any_intersects(new_mid1, new_mid2, obstacles):
+                continue
+            # Соседние сегменты: от a1 до new_mid1 и от new_mid2 до b1
+            a1 = neighbors[0][0]
+            b1 = neighbors[1][0]
+            if self._any_intersects(a1, new_mid1, obstacles):
+                continue
+            if self._any_intersects(new_mid2, b1, obstacles):
+                continue
+            return v
+        return None
+
+    def _build_detour(self,
+                       a_pt: Tuple[float, float],
+                       a1: Tuple[float, float],
+                       b1: Tuple[float, float],
+                       b_pt: Tuple[float, float],
+                       obstacles: List[Tuple[float, float, float, float]],
+                       horizontal_exit: bool) -> Optional[List[Tuple[float, float]]]:
+        """Строит U-образный обход через препятствия (4 поворота)
+        с сохранением строгой ортогональности.
+        """
+        pad = 8
+
+        if horizontal_exit:
+            # Маршрут: a_pt -> a1 -> (a1.x+dx_extend, a1.y) -> (..., detour_y)
+            #          -> (b1.x-dx_retract, detour_y) -> (b1.x-..., b1.y) -> b1 -> b_pt
+            # Проще: выход по горизонтали, детур по Y через крайнюю позицию
+            detour_y_candidates = [a1[1], b1[1]]
+            min_y = min((o[1] for o in obstacles), default=a1[1])
+            max_y = max((o[3] for o in obstacles), default=a1[1])
+            detour_y_candidates.append(min_y - pad * 3)
+            detour_y_candidates.append(max_y + pad * 3)
+
+            for dy_val in sorted(detour_y_candidates, key=lambda v: abs(v - (a1[1] + b1[1]) / 2.0)):
+                # Путь: a_pt, a1, (a1.x, dy_val), (b1.x, dy_val), b1, b_pt
+                p1 = a1
+                p2 = (a1[0], dy_val)
+                p3 = (b1[0], dy_val)
+                p4 = b1
+                if (not self._any_intersects(p1, p2, obstacles) and
+                    not self._any_intersects(p2, p3, obstacles) and
+                    not self._any_intersects(p3, p4, obstacles)):
+                    return [a_pt, a1, p2, p3, b1, b_pt]
+        else:
+            detour_x_candidates = [a1[0], b1[0]]
+            min_x = min((o[0] for o in obstacles), default=a1[0])
+            max_x = max((o[2] for o in obstacles), default=a1[0])
+            detour_x_candidates.append(min_x - pad * 3)
+            detour_x_candidates.append(max_x + pad * 3)
+
+            for dx_val in sorted(detour_x_candidates, key=lambda v: abs(v - (a1[0] + b1[0]) / 2.0)):
+                p1 = a1
+                p2 = (dx_val, a1[1])
+                p3 = (dx_val, b1[1])
+                p4 = b1
+                if (not self._any_intersects(p1, p2, obstacles) and
+                    not self._any_intersects(p2, p3, obstacles) and
+                    not self._any_intersects(p3, p4, obstacles)):
+                    return [a_pt, a1, p2, p3, b1, b_pt]
+        return None
 
     def get_port_names(self) -> Tuple[str, str]:
         """
