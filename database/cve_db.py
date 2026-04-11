@@ -218,7 +218,6 @@ class CVEDatabase:
     # =========================================================
 
     def get_router_hardware(self, search: str = "") -> List[str]:
-        print("[DEBUG] get_router_hardware вызван")
         result = []
         for cpe in self._load_all_cpes():
             if cpe["part"] != "h":
@@ -233,7 +232,6 @@ class CVEDatabase:
                 if not any(x in p for x in ["switch", "modem"]):
                     result.append(self._format_cpe(cpe))
         result = list(dict.fromkeys(result))
-        print(f"[DEBUG] get_router_hardware вернул {len(result)} элементов")
         return self._apply_search(result, search)
 
     def get_switch_hardware(self, search: str = "") -> List[str]:

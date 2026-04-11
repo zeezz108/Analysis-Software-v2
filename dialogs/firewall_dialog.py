@@ -140,22 +140,31 @@ class FirewallDialog:
             font=("Arial", 11), text_color="gray"
         ).pack(anchor=tk.W)
 
-        # Статус брандмауэра
+        # Статус брандмауэра (промт 8 №12: обводка только вокруг «Включен/Отключен»,
+        # а не вокруг всей строки)
         status_color = "#4CAF50" if self.manager.firewall_enabled else "#F44336"
-        status_frame = ctk.CTkFrame(top_frame, border_width=1, border_color=status_color, corner_radius=8)
+        status_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         status_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         left_status = ctk.CTkFrame(status_frame, fg_color="transparent")
-        left_status.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        left_status.pack(side=tk.LEFT)
 
         ctk.CTkLabel(left_status, text="Состояние:", font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=(10, 5))
 
+        # Обводка только вокруг самого статуса
+        self.status_pill = ctk.CTkFrame(
+            left_status, fg_color="transparent",
+            border_width=1, border_color=status_color, corner_radius=6
+        )
+        self.status_pill.pack(side=tk.LEFT, padx=(0, 10))
+
         self.status_var = tk.StringVar(value="Включен" if self.manager.firewall_enabled else "Отключен")
         self.status_label = ctk.CTkLabel(
-            left_status, textvariable=self.status_var,
-            font=("Arial", 13, "bold"), text_color="green" if self.manager.firewall_enabled else "red"
+            self.status_pill, textvariable=self.status_var,
+            font=("Arial", 13, "bold"),
+            text_color="green" if self.manager.firewall_enabled else "red"
         )
-        self.status_label.pack(side=tk.LEFT)
+        self.status_label.pack(side=tk.LEFT, padx=10, pady=3)
 
         # Кнопка включения/выключения
         self.toggle_firewall_btn = ctk.CTkButton(
@@ -462,7 +471,13 @@ class FirewallDialog:
     def toggle_firewall(self):
         self.manager.firewall_enabled = not self.manager.firewall_enabled
         self.status_var.set("Включен" if self.manager.firewall_enabled else "Отключен")
+        new_color = "#4CAF50" if self.manager.firewall_enabled else "#F44336"
         self.status_label.configure(text_color="green" if self.manager.firewall_enabled else "red")
+        if hasattr(self, "status_pill"):
+            try:
+                self.status_pill.configure(border_color=new_color)
+            except Exception:
+                pass
         self.toggle_firewall_btn.configure(
             text="🔴 Выключить" if self.manager.firewall_enabled else "🟢 Включить",
             fg_color="#F44336" if self.manager.firewall_enabled else "#4CAF50"
@@ -515,6 +530,11 @@ class FirewallRuleDialog:
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
+        # Единый стиль секций (промт 8 №12: унификация разнотонности)
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+        self.dialog.configure(fg_color=section_bg)
+
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
@@ -528,7 +548,8 @@ class FirewallRuleDialog:
                      font=("Arial", 18, "bold")).pack(side=tk.LEFT)
 
         # Выбор интерфейса
-        interface_frame = ctk.CTkFrame(main_frame)
+        interface_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
+                                        border_width=1, border_color=border_clr, corner_radius=8)
         interface_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(interface_frame, text="Применить к интерфейсу", font=("Arial", 13, "bold")).pack(anchor=tk.W,
@@ -548,7 +569,8 @@ class FirewallRuleDialog:
                                value=port["port_id"]).pack(anchor=tk.W, padx=40, pady=2)
 
         # Действие и направление
-        action_frame = ctk.CTkFrame(main_frame)
+        action_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
+                                      border_width=1, border_color=border_clr, corner_radius=8)
         action_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(action_frame, text="Действие и направление", font=("Arial", 13, "bold")).pack(anchor=tk.W,
@@ -574,7 +596,8 @@ class FirewallRuleDialog:
         ctk.CTkRadioButton(dir_row, text="Исходящее", variable=self.direction_var, value="out").pack(side=tk.LEFT)
 
         # Протокол и порты
-        ports_frame = ctk.CTkFrame(main_frame)
+        ports_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
+                                     border_width=1, border_color=border_clr, corner_radius=8)
         ports_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(ports_frame, text="Протокол и порты", font=("Arial", 13, "bold")).pack(anchor=tk.W, padx=10,
@@ -611,8 +634,8 @@ class FirewallRuleDialog:
         ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Arial", 10), text_color="gray").pack(
             side=tk.LEFT)
 
-        # Удаленная сеть
-        remote_net_frame = ctk.CTkFrame(ports_frame)
+        # Удаленная сеть (внутри ports_frame — прозрачный фон, чтобы не было разнотонности)
+        remote_net_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         remote_net_frame.pack(fill=tk.X, padx=10, pady=5)
 
         ctk.CTkLabel(remote_net_frame, text="Удаленная сеть:", width=100, anchor=tk.W).pack(side=tk.LEFT)
@@ -624,7 +647,7 @@ class FirewallRuleDialog:
             side=tk.LEFT)
 
         # Тестовые данные
-        test_frame = ctk.CTkFrame(main_frame)
+        test_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         test_frame.pack(fill=tk.X, pady=10)
 
         ctk.CTkButton(test_frame, text="🧪 Заполнить тестовыми данными", command=self.fill_test_data,

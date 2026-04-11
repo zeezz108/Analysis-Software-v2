@@ -1012,14 +1012,23 @@ class NodeCreationDialog:
     # ========================================================================
 
     def create_network_tab(self, parent, config):
-        """Создаёт вкладку с настройками сети."""
+        """Создаёт вкладку с настройками сети.
+
+        Промт 8 №10: унифицирован фон вкладки под единый стиль
+        (как в окне VPN): одна секция с тонкой рамкой, внутри
+        прозрачные сабфреймы.
+        """
+        # Единый стиль секций
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+
         # Основной фрейм с прокруткой
-        main_frame = ctk.CTkFrame(parent)
+        main_frame = ctk.CTkFrame(parent, fg_color=section_bg)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(main_frame, bg=self._get_canvas_bg_color(), highlightthickness=0)
         scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ctk.CTkFrame(canvas)
+        scrollable_frame = ctk.CTkFrame(canvas, fg_color=section_bg)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -1035,18 +1044,20 @@ class NodeCreationDialog:
 
         canvas.bind_all("<MouseWheel>", on_mousewheel)
 
-        # Контейнер для портов
-        ports_frame = ctk.CTkFrame(scrollable_frame)
+        # Секция с сетевыми портами — единая рамка
+        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=section_bg,
+                                    border_width=1, border_color=border_clr, corner_radius=8)
         ports_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ctk.CTkLabel(ports_frame, text="🔌 Сетевые порты", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
                                                                                            pady=(10, 5))
 
-        self.ports_container = ctk.CTkFrame(ports_frame)
+        # Сабконтейнеры прозрачные — чтобы не было разнотонности
+        self.ports_container = ctk.CTkFrame(ports_frame, fg_color="transparent")
         self.ports_container.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # Кнопка добавления порта
-        add_frame = ctk.CTkFrame(ports_frame)
+        add_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         add_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
 
         ctk.CTkLabel(add_frame, text="Добавить порт:", font=("Arial", 12)).pack(side=tk.LEFT, padx=(0, 5))
@@ -1063,7 +1074,7 @@ class NodeCreationDialog:
         ctk.CTkButton(add_frame, text="➕ Добавить", command=self.add_new_port, width=100).pack(side=tk.RIGHT)
 
         # Кнопка тестовых данных
-        test_frame = ctk.CTkFrame(ports_frame)
+        test_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         test_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         ctk.CTkButton(test_frame, text="🧪 Тестовые данные", command=self.fill_test_data).pack(side=tk.RIGHT)
 
@@ -1117,7 +1128,7 @@ class NodeCreationDialog:
 
     def create_port_widget(self, port: Dict, show_network: bool = True):
         """Создаёт виджет для порта."""
-        frame = ctk.CTkFrame(self.ports_container)
+        frame = ctk.CTkFrame(self.ports_container, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2)
 
         icon = "🔌" if port["port_type"] == "ethernet" else "🔆"
@@ -1155,7 +1166,7 @@ class NodeCreationDialog:
 
     def create_wifi_port_widget(self, port: Dict):
         """Создаёт виджет для Wi-Fi порта."""
-        frame = ctk.CTkFrame(self.ports_container)
+        frame = ctk.CTkFrame(self.ports_container, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2, padx=2)
 
         wifi_caps = self.current_node_config.get("wifi_capabilities", {})

@@ -71,6 +71,13 @@ class CanvasView:
         self.resize_zone_corner: Optional[str] = None
         self.resize_zone_start: Optional[Tuple] = None
 
+        # Изолированный режим редактирования размера зоны (промт 8 №8)
+        self.zone_edit_mode: bool = False          # True, если активен изолированный режим
+        self.zone_edit_zone: Optional[Zone] = None  # Редактируемая зона
+        self.zone_edit_original: Optional[Tuple[float, float, float, float]] = None  # Для отката (x,y,w,h)
+        self.zone_edit_overlay = None              # Overlay-фрейм с кнопками Save/Cancel
+        self._control_buttons: list = []           # Кнопки в control_frame — для временного disable
+
         # Creation modes
         self.creating_zone = False
         self.creating_zone_start: Optional[Tuple[float, float]] = None
@@ -170,23 +177,19 @@ class CanvasView:
             cy = self.canvas.canvasy(sy)
             anchor_world = (self.c2w(cx), self.c2w(cy))
 
-        old_zoom = self.zoom
+        # Фиксируем новый зум и обновляем scrollregion. Далее сначала
+        # скроллим viewport на «куда нужно» (без рендера старого зума),
+        # а только потом делаем redraw. Это устраняет «ghost frame»:
+        # пользователь больше не видит промежуточный кадр, в котором
+        # элементы нарисованы в новой позиции, а окно смотрит на старое.
         self.zoom = new_zoom
         self.clear_icon_bounds_cache()
         self.update_scrollregion()
-        self.redraw()
-        # Обновляем индикатор зума, если он уже создан
-        if hasattr(self, "zoom_label") and self.zoom_label is not None:
-            try:
-                self.zoom_label.configure(text=f"{int(round(self.zoom * 100))}%")
-            except Exception:
-                pass
 
-        # Скроллим так, чтобы якорь остался под курсором
+        # Скроллим так, чтобы якорь остался под курсором — ДО redraw.
         if anchor_world is not None and anchor_screen is not None:
             new_cx = self.w2c(anchor_world[0])
             new_cy = self.w2c(anchor_world[1])
-            # xview_moveto работает с долей от scrollregion
             region_w = max(1, self.WORLD_WIDTH * self.zoom)
             region_h = max(1, self.WORLD_HEIGHT * self.zoom)
             sx, sy = anchor_screen
@@ -195,6 +198,18 @@ class CanvasView:
             try:
                 self.canvas.xview_moveto(max(0.0, min(1.0, target_x)))
                 self.canvas.yview_moveto(max(0.0, min(1.0, target_y)))
+            except Exception:
+                pass
+
+        # Теперь единым махом стираем старое и рисуем новое. Между delete
+        # и create_* Tk не успевает вывести промежуточное состояние на экран,
+        # т.к. мы не вызываем canvas.update() — обновление произойдёт на idle.
+        self.redraw()
+
+        # Обновляем индикатор зума, если он уже создан
+        if hasattr(self, "zoom_label") and self.zoom_label is not None:
+            try:
+                self.zoom_label.configure(text=f"{int(round(self.zoom * 100))}%")
             except Exception:
                 pass
 
@@ -431,9 +446,18 @@ class CanvasView:
         self.btn_scale = ctk.CTkButton(control_frame, text="Масштаб интерфейса", command=self.show_scale_settings)
         self.btn_scale.pack(fill=tk.X, pady=2)
 
+        # Список кнопок для временной блокировки (используется изолированным
+        # режимом редактирования зоны — промт 8 №8).
+        self._control_buttons = [
+            self.btn_add_zone, self.btn_add_node, self.btn_create_link,
+            self.btn_delete_link, self.btn_delete, self.btn_clear,
+            self.btn_connectivity, self.btn_grid, self.btn_scale,
+        ]
+
         # Правая область - холст c прокруткой
-        canvas_frame = ttk.Frame(self.root)
-        canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self._canvas_frame = ttk.Frame(self.root)
+        self._canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        canvas_frame = self._canvas_frame
 
         # Скроллбары
         h_scroll = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
@@ -758,6 +782,20 @@ class CanvasView:
         self.canvas.focus_set()
         x, y = self.canvas_event_world(event)
 
+        # Изолированный режим редактирования размера зоны (промт 8 №8):
+        # единственная разрешённая активность — тянуть за уголки этой зоны.
+        if self.zone_edit_mode and self.zone_edit_zone is not None:
+            corner = self.get_zone_corner_at(x, y, self.zone_edit_zone)
+            edge = self.get_zone_edge_at(x, y, self.zone_edit_zone)
+            if corner or edge:
+                self.resizing_zone = True
+                self.resize_zone = self.zone_edit_zone
+                self.resize_zone_corner = corner or edge
+                zone = self.zone_edit_zone
+                self.resize_zone_start = (x, y, zone.x, zone.y, zone.width, zone.height)
+            # Клики по всему остальному — игнорируются
+            return
+
         if self.mode == "creating_zone":
             sx = self.snap_to_grid(x)
             sy = self.snap_to_grid(y)
@@ -825,41 +863,29 @@ class CanvasView:
             node_x, node_y = node.position
             self.drag_offset = (x - node_x, y - node_y)
             self.clear_temp_elements()
+            # Синяя обводка при перетаскивании — сплошная (промт 8 #9)
             temp_rect = self.canvas.create_rectangle(
                 self.w2c(node_x), self.w2c(node_y),
                 self.w2c(node_x + node.size[0]), self.w2c(node_y + node.size[1]),
-                outline="blue", dash=(2, 2), width=2)
+                outline="blue", width=2)
             self.temp_elements.append(temp_rect)
         else:
             zone = self.find_tim_zone_at(x, y)
             if zone:
-                corner = self.get_zone_corner_at(x, y, zone)
-                edge = self.get_zone_edge_at(x, y, zone)
-
-                if corner or edge:
-                    self.resizing_zone = True
-                    self.resize_zone = zone
-                    self.resize_zone_corner = corner or edge
-                    self.resize_zone_start = (x, y, zone.x, zone.y, zone.width, zone.height)
-                    self.clear_temp_elements()
-                    temp_rect = self.canvas.create_rectangle(
-                        self.w2c(zone.x), self.w2c(zone.y),
-                        self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
-                        outline="orange", dash=(2, 2), width=2)
-                    self.temp_elements.append(temp_rect)
-                    self.selected_zone_id = zone.id
-                else:
-                    self.dragging_zone = True
-                    self.drag_zone = zone
-                    self.selected_zone_id = zone.id
-                    center_x, center_y = zone.center()
-                    self.drag_zone_offset = (x - center_x, y - center_y)
-                    self.clear_temp_elements()
-                    temp_rect = self.canvas.create_rectangle(
-                        self.w2c(zone.x), self.w2c(zone.y),
-                        self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
-                        outline="purple", dash=(2, 2), width=2)
-                    self.temp_elements.append(temp_rect)
+                # Промт 8 №8: drag-resize зоны за уголки в обычном режиме отключён.
+                # Ресайз зоны доступен только через ПКМ → «Изменить размер»
+                # (изолированный режим). Остаётся только перетаскивание зоны.
+                self.dragging_zone = True
+                self.drag_zone = zone
+                self.selected_zone_id = zone.id
+                center_x, center_y = zone.center()
+                self.drag_zone_offset = (x - center_x, y - center_y)
+                self.clear_temp_elements()
+                temp_rect = self.canvas.create_rectangle(
+                    self.w2c(zone.x), self.w2c(zone.y),
+                    self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
+                    outline="purple", dash=(2, 2), width=2)
+                self.temp_elements.append(temp_rect)
             else:
                 self.selected_node_id = None
                 self.selected_zone_id = None
@@ -908,36 +934,38 @@ class CanvasView:
 
             new_x, new_y, new_w, new_h = zone_x, zone_y, zone_w, zone_h
 
-            if self.resize_zone_corner == 'nw':
-                new_x = zone_x + dx
+            corner = self.resize_zone_corner
+            if corner == 'nw':
+                new_x = zone_x + dx; new_y = zone_y + dy
+                new_w = zone_w - dx; new_h = zone_h - dy
+            elif corner == 'ne':
                 new_y = zone_y + dy
-                new_w = zone_w - dx
-                new_h = zone_h - dy
-            elif self.resize_zone_corner == 'ne':
-                new_y = zone_y + dy
-                new_w = zone_w + dx
-                new_h = zone_h - dy
-            elif self.resize_zone_corner == 'sw':
+                new_w = zone_w + dx; new_h = zone_h - dy
+            elif corner == 'sw':
                 new_x = zone_x + dx
-                new_w = zone_w - dx
+                new_w = zone_w - dx; new_h = zone_h + dy
+            elif corner == 'se':
+                new_w = zone_w + dx; new_h = zone_h + dy
+            elif corner == 'n':
+                new_y = zone_y + dy; new_h = zone_h - dy
+            elif corner == 's':
                 new_h = zone_h + dy
-            elif self.resize_zone_corner == 'se':
+            elif corner == 'w':
+                new_x = zone_x + dx; new_w = zone_w - dx
+            elif corner == 'e':
                 new_w = zone_w + dx
-                new_h = zone_h + dy
 
             new_w = max(100, new_w)
             new_h = max(100, new_h)
-
-            # Привязка к размерной сетке
             new_x = self.snap_to_grid(new_x)
             new_y = self.snap_to_grid(new_y)
             new_w = self.snap_size_to_grid(new_w)
             new_h = self.snap_size_to_grid(new_h)
 
-            if self.temp_elements:
-                self.canvas.coords(self.temp_elements[0],
-                                   self.w2c(new_x), self.w2c(new_y),
-                                   self.w2c(new_x + new_w), self.w2c(new_y + new_h))
+            # В изолированном режиме меняем зону напрямую и перерисовываем
+            if self.zone_edit_mode and self.zone_edit_zone is self.resize_zone:
+                self.board.resize_zone(self.resize_zone.id, new_x, new_y, new_w, new_h)
+                self.redraw()
 
     def on_canvas_release(self, event):
         x, y = self.canvas_event_world(event)
@@ -1016,44 +1044,15 @@ class CanvasView:
             self.drag_zone = None
 
         elif self.resizing_zone and self.resize_zone:
-            if self.resize_zone_start:
-                start_x, start_y, zone_x, zone_y, zone_w, zone_h = self.resize_zone_start
-                dx = x - start_x
-                dy = y - start_y
-
-                new_x, new_y, new_w, new_h = zone_x, zone_y, zone_w, zone_h
-
-                if self.resize_zone_corner == 'nw':
-                    new_x = zone_x + dx
-                    new_y = zone_y + dy
-                    new_w = zone_w - dx
-                    new_h = zone_h - dy
-                elif self.resize_zone_corner == 'ne':
-                    new_y = zone_y + dy
-                    new_w = zone_w + dx
-                    new_h = zone_h - dy
-                elif self.resize_zone_corner == 'sw':
-                    new_x = zone_x + dx
-                    new_w = zone_w - dx
-                    new_h = zone_h + dy
-                elif self.resize_zone_corner == 'se':
-                    new_w = zone_w + dx
-                    new_h = zone_h + dy
-
-                new_w = max(100, new_w)
-                new_h = max(100, new_h)
-
-                # Привязка итоговых координат и размеров к размерной сетке
-                new_x = self.snap_to_grid(new_x)
-                new_y = self.snap_to_grid(new_y)
-                new_w = self.snap_size_to_grid(new_w)
-                new_h = self.snap_size_to_grid(new_h)
-
-                self.board.resize_zone(self.resize_zone.id, new_x, new_y, new_w, new_h)
-                self.clear_temp_elements()
-                self.redraw()
+            # В изолированном режиме зона уже обновлена в ходе drag —
+            # здесь просто сбрасываем текущее состояние drag'а.
             self.resizing_zone = False
-            self.resize_zone = None
+            self.resize_zone_corner = None
+            self.resize_zone_start = None
+            # Не сбрасываем self.resize_zone, если остаёмся в zone_edit_mode:
+            # она ещё понадобится для следующего drag за другой уголок.
+            if not self.zone_edit_mode:
+                self.resize_zone = None
 
     def on_canvas_right_click(self, event):
         x, y = self.canvas_event_world(event)
@@ -1074,6 +1073,20 @@ class CanvasView:
     def on_canvas_motion(self, event):
         x, y = self.canvas_event_world(event)
 
+        # Изолированный режим редактирования зоны — курсор показывается
+        # только над уголками редактируемой зоны
+        if self.zone_edit_mode and self.zone_edit_zone is not None:
+            z = self.zone_edit_zone
+            corner = self.get_zone_corner_at(x, y, z)
+            edge = self.get_zone_edge_at(x, y, z)
+            if corner:
+                self.canvas.config(cursor="sizing")
+            elif edge:
+                self.canvas.config(cursor="sb_v_double_arrow" if edge in ['n', 's'] else "sb_h_double_arrow")
+            else:
+                self.canvas.config(cursor="")
+            return
+
         if self.mode == "creating_zone":
             self.canvas.config(cursor="cross")
             return
@@ -1091,14 +1104,8 @@ class CanvasView:
             else:
                 zone = self.find_tim_zone_at(x, y)
                 if zone:
-                    corner = self.get_zone_corner_at(x, y, zone)
-                    edge = self.get_zone_edge_at(x, y, zone)
-                    if corner:
-                        self.canvas.config(cursor="sizing")
-                    elif edge:
-                        self.canvas.config(cursor="sb_v_double_arrow" if edge in ['n', 's'] else "sb_h_double_arrow")
-                    else:
-                        self.canvas.config(cursor="fleur")
+                    # В обычном режиме только перемещение зон (без уголков)
+                    self.canvas.config(cursor="fleur")
                 else:
                     self.canvas.config(cursor="")
 
@@ -1112,10 +1119,11 @@ class CanvasView:
         x, y = node.position
         w, h = node.size
         self.clear_temp_elements()
+        # Сплошная синяя обводка (промт 8 #9)
         temp_rect = self.canvas.create_rectangle(
             self.w2c(x - 2), self.w2c(y - 2),
             self.w2c(x + w + 2), self.w2c(y + h + 2),
-            outline="blue", width=3, dash=(5, 3))
+            outline="blue", width=3)
         self.temp_elements.append(temp_rect)
 
     def find_node_at(self, x: float, y: float) -> Optional[Node]:
@@ -1318,15 +1326,99 @@ class CanvasView:
         self.redraw()
 
     def start_zone_resize(self, zone: Zone):
-        self.resizing_zone = True
-        self.resize_zone = zone
-        self.clear_temp_elements()
-        temp_rect = self.canvas.create_rectangle(
-            self.w2c(zone.x), self.w2c(zone.y),
-            self.w2c(zone.x + zone.width), self.w2c(zone.y + zone.height),
-            outline="orange", dash=(2, 2), width=2)
-        self.temp_elements.append(temp_rect)
+        """Входит в изолированный режим редактирования размера зоны
+        (промт 8 №8).
+
+        - Отключает все управляющие кнопки слева;
+        - Поверх холста появляется overlay с кнопками «Сохранить» / «Отмена»;
+        - Единственное разрешённое действие — тянуть за уголки/грани зоны;
+        - «Отмена» возвращает исходные размеры, «Сохранить» применяет.
+        """
+        self.zone_edit_mode = True
+        self.zone_edit_zone = zone
+        self.zone_edit_original = (zone.x, zone.y, zone.width, zone.height)
+        self.selected_zone_id = zone.id
+
+        # Блокируем все управляющие кнопки
+        for btn in self._control_buttons:
+            try:
+                btn.configure(state="disabled")
+            except Exception:
+                pass
+
+        # Overlay с кнопками Save/Cancel — поверх холста, в правом нижнем углу
+        self.zone_edit_overlay = tk.Frame(
+            self.canvas, bg="#ffffff", bd=1, relief=tk.SOLID
+        )
+        title_lbl = tk.Label(
+            self.zone_edit_overlay,
+            text=f"Редактирование размера зоны: {zone.get_display_text()}",
+            font=("Arial", 10, "bold"),
+            bg="#ffffff", fg="#333333",
+        )
+        title_lbl.pack(side=tk.TOP, padx=10, pady=(6, 2))
+
+        btns_row = tk.Frame(self.zone_edit_overlay, bg="#ffffff")
+        btns_row.pack(side=tk.BOTTOM, padx=10, pady=(2, 6))
+        save_btn = tk.Button(
+            btns_row, text="✔ Сохранить", command=self._zone_edit_save,
+            bg="#4CAF50", fg="white", font=("Arial", 10, "bold"),
+            padx=10, pady=3, bd=0, activebackground="#3FA043",
+        )
+        save_btn.pack(side=tk.LEFT, padx=4)
+        cancel_btn = tk.Button(
+            btns_row, text="✕ Отмена", command=self._zone_edit_cancel,
+            bg="#CD3333", fg="white", font=("Arial", 10),
+            padx=10, pady=3, bd=0, activebackground="#B52929",
+        )
+        cancel_btn.pack(side=tk.LEFT, padx=4)
+
+        # place в правом нижнем углу, выше индикатора зума
+        self.zone_edit_overlay.place(relx=1.0, rely=1.0, anchor="se", x=-6, y=-40)
+
+        # Первая отрисовка (чтобы показать уголки редактируемой зоны)
         self.redraw()
+
+    def _zone_edit_exit(self) -> None:
+        """Выход из изолированного режима — общая очистка."""
+        self.zone_edit_mode = False
+        self.zone_edit_zone = None
+        self.zone_edit_original = None
+        self.resizing_zone = False
+        self.resize_zone = None
+        self.resize_zone_corner = None
+        self.resize_zone_start = None
+
+        if self.zone_edit_overlay is not None:
+            try:
+                self.zone_edit_overlay.destroy()
+            except Exception:
+                pass
+            self.zone_edit_overlay = None
+
+        # Возвращаем кнопки в рабочее состояние
+        for btn in self._control_buttons:
+            try:
+                btn.configure(state="normal")
+            except Exception:
+                pass
+
+        self.clear_temp_elements()
+        self.canvas.config(cursor="")
+        self.redraw()
+
+    def _zone_edit_save(self) -> None:
+        """Применить изменения и выйти из режима."""
+        self._zone_edit_exit()
+
+    def _zone_edit_cancel(self) -> None:
+        """Откатить к исходным размерам и выйти из режима."""
+        if self.zone_edit_zone is not None and self.zone_edit_original is not None:
+            zone = self.zone_edit_zone
+            ox, oy, ow, oh = self.zone_edit_original
+            # Используем board.resize_zone для корректности проверок
+            self.board.resize_zone(zone.id, ox, oy, ow, oh)
+        self._zone_edit_exit()
 
     def delete_node(self, node: Node):
         if messagebox.askyesno("Удаление узла", f"Удалить узел '{node.name}'?"):
@@ -1377,7 +1469,14 @@ class CanvasView:
         for z in self.board.get_tim_zones():
             wx1, wy1, wx2, wy2 = z.to_canvas()
             x1, y1, x2, y2 = self.w2c(wx1), self.w2c(wy1), self.w2c(wx2), self.w2c(wy2)
-            self.canvas.create_rectangle(x1, y1, x2, y2, outline="black", fill="#f0f0f0", width=2)
+            # В изолированном режиме выделяем редактируемую зону оранжевым контуром
+            if (self.zone_edit_mode and self.zone_edit_zone is not None
+                    and z.id == self.zone_edit_zone.id):
+                self.canvas.create_rectangle(x1, y1, x2, y2, outline="#FF9800",
+                                              fill="#FFF8E1", width=3)
+            else:
+                self.canvas.create_rectangle(x1, y1, x2, y2, outline="black",
+                                              fill="#f0f0f0", width=2)
 
             # Названия зон в мировых размерах (пропорционально самой зоне)
             main_text = z.get_display_text()
@@ -1475,8 +1574,9 @@ class CanvasView:
             y = self.w2c(wy)
             w = ww * z_scale
             h = wh * z_scale
-            outline_color = "red" if n.id == self.selected_node_id else "black"
-            outline_width = 3 if n.id == self.selected_node_id else 2
+            # Обводка fallback-прямоугольников без выделения selected (это убрано)
+            outline_color = "black"
+            outline_width = 2
 
             icon = self.NODE_ICONS.get(n.type)
             if icon:
@@ -1486,8 +1586,7 @@ class CanvasView:
                     icon_tk = ImageTk.PhotoImage(img)
                     self._icon_refs.append(icon_tk)
                     self.canvas.create_image(x + w / 2, y + h / 2, image=icon_tk)
-                    if n.id == self.selected_node_id:
-                        self.canvas.create_rectangle(x, y, x + w, y + h, outline="red", width=3, dash=(3, 3))
+                    # Красная пунктирная обводка для selected убрана по требованию (промт 8 #9).
                 except Exception:
                     color = self.NODE_COLORS.get(n.type, "#999999")
                     self.canvas.create_rectangle(x, y, x + w, y + h, fill=color, outline=outline_color,
@@ -1513,4 +1612,22 @@ class CanvasView:
                 self.canvas.create_oval(led_x - led_radius, led_y - led_radius, led_x + led_radius, led_y + led_radius,
                                         fill="#F44336", outline="#B71C1C", width=1)
 
-        self.canvas.update()
+        # Отрисовка уголков ресайза редактируемой зоны (изолированный режим).
+        # Рисуем поверх всего остального, чтобы уголки были видны всегда.
+        if self.zone_edit_mode and self.zone_edit_zone is not None:
+            zone = self.zone_edit_zone
+            zx1 = self.w2c(zone.x)
+            zy1 = self.w2c(zone.y)
+            zx2 = self.w2c(zone.x + zone.width)
+            zy2 = self.w2c(zone.y + zone.height)
+            handle = 6
+            corners = [(zx1, zy1), (zx2, zy1), (zx1, zy2), (zx2, zy2)]
+            for cx, cy in corners:
+                self.canvas.create_rectangle(
+                    cx - handle, cy - handle, cx + handle, cy + handle,
+                    fill="#FF9800", outline="#E65100", width=2
+                )
+
+        # Намеренно НЕ вызываем canvas.update() здесь — форсированный flush
+        # при каждом redraw приводил к «ghost frame» при zoom. Обновление
+        # выполнит Tk сам на ближайшем idle-tick.

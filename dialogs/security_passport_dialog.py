@@ -12,7 +12,6 @@ import customtkinter as ctk
 import threading
 import time
 from datetime import datetime
-import pandas as pd
 from typing import List, Dict, Any, Optional
 
 from models.node import Node
@@ -38,7 +37,7 @@ class SecurityPassportDialog:
 
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"Паспорт безопасности: {node.name}")
-        self.dialog.geometry("1600x900")
+        self.dialog.geometry("1600x1020")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -209,26 +208,22 @@ class SecurityPassportDialog:
                 return cached
 
         try:
+            # Промт 8 №5: убран неточный keyword fallback — он путал
+            # компоненты между собой (например, «Bloody V8» и «Bloody B880»
+            # давали одинаковые CVE, потому что матч шёл по слову "bloody").
+            # Теперь ищем строго по vendor+product через CPE parser;
+            # если ничего не найдено — возвращаем пустой список.
             all_cves: List[Dict] = []
             cpe_info = extract_cpe_components(component_name)
 
             if cpe_info.get('vendor'):
                 cve_list = self.db.get_cves_for_component(
                     vendor=cpe_info['vendor'],
-                    product=cpe_info['product']
+                    product=cpe_info.get('product') or ""
                 )
                 all_cves.extend(cve_list)
 
-            if not all_cves:
-                keywords = component_name.lower().split()[:3]
-                for keyword in keywords:
-                    if len(keyword) > 3:
-                        cve_list = self.db.get_cves_by_cpe_mask(keyword)
-                        all_cves.extend(cve_list)
-                        if len(all_cves) >= 20:
-                            break
-
-            # Убираем дубликаты
+            # Убираем дубликаты по cve_id
             seen_cves = set()
             unique_cves = []
             for cve in all_cves:
@@ -633,8 +628,6 @@ class SecurityPassportDialog:
         left_buttons = ctk.CTkFrame(button_frame, fg_color="transparent")
         left_buttons.pack(side=tk.LEFT)
 
-        ctk.CTkButton(left_buttons, text="📥 Экспорт в CSV", command=self.export_to_csv, width=130, height=38).pack(
-            side=tk.LEFT, padx=5)
         ctk.CTkButton(left_buttons, text="📄 Экспорт в PDF", command=self.export_to_pdf, width=130, height=38,
                       fg_color="#8E44AD", hover_color="#7B3E96").pack(side=tk.LEFT, padx=5)
         ctk.CTkButton(left_buttons, text="🔄 Обновить", command=self.refresh_data, width=110, height=38).pack(
@@ -729,23 +722,6 @@ class SecurityPassportDialog:
             self.status_label.configure(text="✅ Уязвимостей не найдено", text_color="green")
 
         self.count_label.configure(text=f"({total_vulnerabilities})")
-
-    def export_to_csv(self):
-        """Экспортирует данные в CSV."""
-        data = []
-        for item in self.tree.get_children():
-            values = self.tree.item(item)['values']
-            if values[0] != "" or values[1] != "Нет данных":
-                data.append(values)
-
-        if data:
-            df = pd.DataFrame(data, columns=["Идентификатор", "Наименование объекта", "Спецификация",
-                                             "CWE", "CVE", "CVSS V2.0", "CVSS V3.1", "CVSS V4.0"])
-            filename = f"Паспорт_безопасности_{self.node.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-            df.to_csv(filename, index=False, encoding='utf-8-sig')
-            messagebox.showinfo("Экспорт завершен", f"Данные экспортированы в файл:\n{filename}")
-        else:
-            messagebox.showwarning("Нет данных", "Нет данных для экспорта")
 
     def export_to_pdf(self):
         """Экспортирует паспорт безопасности в PDF (через reportlab).

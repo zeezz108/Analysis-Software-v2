@@ -497,14 +497,17 @@ class PropertiesDialog:
                                                               text_color="green" if var.get() else "gray"))
 
     def create_network_editor(self, parent, config: Dict):
-        """Создаёт редактор сети."""
+        """Создаёт редактор сети (промт 8 №10: единый стиль фреймов)."""
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+
         # Основной фрейм с прокруткой
-        main_frame = ctk.CTkFrame(parent)
+        main_frame = ctk.CTkFrame(parent, fg_color=section_bg)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(main_frame, bg=self._get_canvas_bg_color(), highlightthickness=0)
         scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ctk.CTkFrame(canvas)
+        scrollable_frame = ctk.CTkFrame(canvas, fg_color=section_bg)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -520,14 +523,15 @@ class PropertiesDialog:
 
         canvas.bind_all("<MouseWheel>", on_mousewheel)
 
-        # Порты
-        ports_frame = ctk.CTkFrame(scrollable_frame)
+        # Порты — одна секция с тонкой рамкой
+        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=section_bg,
+                                    border_width=1, border_color=border_clr, corner_radius=8)
         ports_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ctk.CTkLabel(ports_frame, text="🔌 Сетевые порты", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
                                                                                            pady=(10, 5))
 
-        ports_container = ctk.CTkFrame(ports_frame)
+        ports_container = ctk.CTkFrame(ports_frame, fg_color="transparent")
         ports_container.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # Отображаем порты
@@ -561,7 +565,7 @@ class PropertiesDialog:
                 self.create_port_editor_widget(ports_container, port, show_network=False)
 
         # Кнопка добавления порта
-        add_frame = ctk.CTkFrame(ports_frame)
+        add_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         add_frame.pack(fill=tk.X, padx=10, pady=(10, 10))
 
         ctk.CTkLabel(add_frame, text="Добавить порт:", font=("Arial", 12)).pack(side=tk.LEFT, padx=(0, 5))
@@ -577,7 +581,7 @@ class PropertiesDialog:
         ctk.CTkButton(add_frame, text="➕ Добавить", command=self.add_port_to_node, width=100).pack(side=tk.RIGHT)
 
         # Тестовые данные
-        test_frame = ctk.CTkFrame(ports_frame)
+        test_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         test_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
         ctk.CTkButton(test_frame, text="🧪 Тестовые данные", command=self.fill_test_data).pack(side=tk.RIGHT)
 
@@ -589,7 +593,7 @@ class PropertiesDialog:
 
     def create_port_editor_widget(self, parent, port: Dict, show_network: bool = True):
         """Создаёт виджет для редактирования порта."""
-        frame = ctk.CTkFrame(parent)
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2)
 
         icon = "🔌" if port["port_type"] == "ethernet" else "🔆"
@@ -627,7 +631,7 @@ class PropertiesDialog:
 
     def create_wifi_port_editor_widget(self, parent, port: Dict, config: Dict):
         """Создаёт виджет для редактирования Wi-Fi порта."""
-        frame = ctk.CTkFrame(parent)
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2)
 
         wifi_caps = config.get("wifi_capabilities", {})
@@ -1072,7 +1076,6 @@ class ViewOnlyPropertiesDialog:
                     result["🖱️ Периферия"].append({"text": item, "category": category})
 
         # 4. Сетевые порты
-        print(f"[DEBUG] Node ports: {self.node.ports}")
         for port in self.node.ports:
             port_type = port.get("port_type", "unknown")
             port_name = port.get("name", "?")
@@ -1102,13 +1105,9 @@ class ViewOnlyPropertiesDialog:
 
             result["🌐 Сетевые порты"].append(port_data)
 
-        print(f"[DEBUG] Final result ports count: {len(result['🌐 Сетевые порты'])}")
-        print(f"[DEBUG] _get_all_components END")
         return result
 
     def create_widgets(self):
-        print("[DEBUG] create_widgets START")
-
         # Заголовок
         title_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         title_frame.pack(fill=tk.X, padx=25, pady=(15, 5))
@@ -1200,7 +1199,6 @@ class ViewOnlyPropertiesDialog:
             content_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
 
             for idx, item in enumerate(items):
-                print(f"[DEBUG] Item {idx} in {category}: {item}")
                 if category == "🌐 Сетевые порты":
                     self._create_port_widget(content_frame, item)
                 else:
@@ -1247,11 +1245,8 @@ class ViewOnlyPropertiesDialog:
             corner_radius=8
         ).pack(side=tk.RIGHT, padx=5)
 
-        print("[DEBUG] create_widgets END")
-
     def _create_component_widget(self, parent, item):
         """Создаёт виджет для обычного компонента."""
-        print(f"[DEBUG] _create_component_widget: {item}")
 
         item_frame = ctk.CTkFrame(parent, fg_color="transparent")
         item_frame.pack(fill=tk.X, pady=(0, 8))
@@ -1298,8 +1293,6 @@ class ViewOnlyPropertiesDialog:
 
     def _create_port_widget(self, parent, port: Dict):
         """Создаёт виджет для сетевого порта с красивым оформлением."""
-        print(f"[DEBUG] _create_port_widget: {port}")
-
         port_frame = ctk.CTkFrame(parent, fg_color="transparent")
         port_frame.pack(fill=tk.X, pady=(0, 4))
 

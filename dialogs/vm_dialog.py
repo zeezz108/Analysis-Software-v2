@@ -607,8 +607,12 @@ class VMCreationDialog:
         status_label.pack(side=tk.LEFT)
 
     def create_network_tab(self, parent):
-        """Создаёт вкладку с сетевыми интерфейсами."""
-        frame = ctk.CTkFrame(parent)
+        """Создаёт вкладку с сетевыми интерфейсами (промт 8 №10)."""
+        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
+        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+
+        frame = ctk.CTkFrame(parent, fg_color=section_bg,
+                              border_width=1, border_color=border_clr, corner_radius=8)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         title_frame = ctk.CTkFrame(frame, fg_color="transparent")
@@ -621,12 +625,12 @@ class VMCreationDialog:
             side=tk.RIGHT, padx=5)
 
         # Контейнер с прокруткой
-        ports_container = ctk.CTkFrame(frame)
+        ports_container = ctk.CTkFrame(frame, fg_color="transparent")
         ports_container.pack(fill=tk.BOTH, expand=True, pady=5)
 
         canvas = tk.Canvas(ports_container, highlightthickness=0, bg=self._get_canvas_bg_color())
         scrollbar = ttk.Scrollbar(ports_container, orient="vertical", command=canvas.yview)
-        scrollable_frame = ctk.CTkFrame(canvas)
+        scrollable_frame = ctk.CTkFrame(canvas, fg_color=section_bg)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -668,7 +672,7 @@ class VMCreationDialog:
         }
 
     def create_port_widget(self, port: Dict):
-        frame = ctk.CTkFrame(self.ports_list_frame)
+        frame = ctk.CTkFrame(self.ports_list_frame, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2, padx=2)
 
         ctk.CTkLabel(frame, text=f"{port['name']}:", width=50, anchor=tk.W).pack(side=tk.LEFT, padx=2)

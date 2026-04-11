@@ -97,7 +97,7 @@ class NodeContextMenuHandler:
         # Паспорт безопасности (для всех, кроме Интернета)
         if node.type != "Internet":
             menu.add_command(
-                label="🛡️ Паспорт безопасности",
+                label="🛡 Паспорт безопасности",
                 command=lambda: canvas_view.show_node_security_passport(node)
             )
 

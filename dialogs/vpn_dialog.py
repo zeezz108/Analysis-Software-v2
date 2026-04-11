@@ -43,10 +43,10 @@ class VPNConfigDialog:
         self.board = board
         self.result = None
 
-        # Создаём окно
+        # Создаём окно (горизонтальная раскладка блоков: шире, ниже)
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"Настройка VPN на узле: {node.name}")
-        self.dialog.geometry("600x850")
+        self.dialog.geometry("1100x640")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -89,10 +89,15 @@ class VPNConfigDialog:
             font=("Arial", 18, "bold")
         ).pack(pady=(0, 20))
 
-        # ===== БЛОК КЛИЕНТА =====
-        client_frame = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+        # ===== ГОРИЗОНТАЛЬНАЯ РАСКЛАДКА БЛОКОВ =====
+        # Промт 8 №2: блоки VPN-Клиент и VPN-Сервер расположены бок о бок.
+        blocks_row = ctk.CTkFrame(main_frame, fg_color="transparent")
+        blocks_row.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        # ===== БЛОК КЛИЕНТА (слева) =====
+        client_frame = ctk.CTkFrame(blocks_row, fg_color=section_bg, border_width=1,
                                      border_color="#42A5F5", corner_radius=8)
-        client_frame.pack(fill=tk.X, pady=(0, 15))
+        client_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
 
         # Цветная полоска-заголовок
         client_accent = ctk.CTkFrame(client_frame, fg_color="#42A5F5", height=3, corner_radius=0)
@@ -120,14 +125,14 @@ class VPNConfigDialog:
 
         # Контейнер для настроек клиента
         self.client_settings = ctk.CTkFrame(client_frame, fg_color="transparent")
-        self.client_settings.pack(fill=tk.X, padx=15, pady=(0, 10))
+        self.client_settings.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
 
         self.create_client_settings(self.client_settings)
 
-        # ===== БЛОК СЕРВЕРА =====
-        server_frame = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
+        # ===== БЛОК СЕРВЕРА (справа) =====
+        server_frame = ctk.CTkFrame(blocks_row, fg_color=section_bg, border_width=1,
                                      border_color="#66BB6A", corner_radius=8)
-        server_frame.pack(fill=tk.X, pady=(0, 15))
+        server_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
 
         # Цветная полоска-заголовок
         server_accent = ctk.CTkFrame(server_frame, fg_color="#66BB6A", height=3, corner_radius=0)
@@ -155,13 +160,21 @@ class VPNConfigDialog:
 
         # Контейнер для настроек сервера
         self.server_settings = ctk.CTkFrame(server_frame, fg_color="transparent")
-        self.server_settings.pack(fill=tk.X, padx=15, pady=(0, 10))
+        self.server_settings.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
 
         self.create_server_settings(self.server_settings)
 
         # ===== КНОПКИ =====
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
+
+        # Промт 8 №1: кнопка автозаполнения тестовыми данными (слева).
+        ctk.CTkButton(
+            btn_frame, text="🧪 Тестовые данные",
+            command=self.fill_test_data, fg_color="#6A5ACD",
+            hover_color="#5A4ABE",
+            width=160, height=38, font=("Arial", 12, "bold")
+        ).pack(side=tk.LEFT, padx=5)
 
         ctk.CTkButton(
             btn_frame, text="✔ Сохранить",
@@ -440,7 +453,12 @@ class VPNConfigDialog:
         return None
 
     def check_connection(self):
-        """Проверяет, установлено ли соединение с VPN-сервером."""
+        """Проверяет, установлено ли соединение с VPN-сервером.
+
+        Помимо совпадения IP и порта, требует совпадения VPN-протокола
+        между клиентом и сервером — в реальности туннель не поднимается
+        при разных протоколах (промт 8 №3).
+        """
         if not self.client_enabled_var.get():
             self.connection_status_var.set("Клиент отключён")
             self.status_label.configure(text_color="orange")
@@ -461,26 +479,78 @@ class VPNConfigDialog:
         # Ищем сервер с таким же VPN IP и портом
         server_node = self.find_vpn_server()
 
-        if server_node:
-            # Проверяем совпадение порта
-            server_port = getattr(server_node, 'vpn_server_port', None)
-            if server_port and str(server_port) == client_port:
-                self.connection_status_var.set(f"✅ Подключено к {server_node.name}")
-                self.status_label.configure(text_color="green")
-
-                # Сохраняем ID сервера для связи
-                self.node.vpn_client_peer_id = server_node.id
-                self.node.vpn_client_peer_ip = server_ip
-            else:
-                self.connection_status_var.set(f"❌ Порт не совпадает (нужен {server_port})")
-                self.status_label.configure(text_color="red")
-                self.node.vpn_client_peer_id = None
-                self.node.vpn_client_peer_ip = ""
-        else:
+        if not server_node:
             self.connection_status_var.set("❌ Сервер не найден (проверьте IP и порт)")
             self.status_label.configure(text_color="red")
             self.node.vpn_client_peer_id = None
             self.node.vpn_client_peer_ip = ""
+            return
+
+        server_port = getattr(server_node, 'vpn_server_port', None)
+        if not (server_port and str(server_port) == client_port):
+            self.connection_status_var.set(f"❌ Порт не совпадает (нужен {server_port})")
+            self.status_label.configure(text_color="red")
+            self.node.vpn_client_peer_id = None
+            self.node.vpn_client_peer_ip = ""
+            return
+
+        # Проверка совпадения VPN-протокола на обеих сторонах туннеля
+        client_protocol = self.client_protocol_var.get() if hasattr(self, "client_protocol_var") else ""
+        server_protocol = getattr(server_node, "vpn_server_protocol", "") or ""
+        if client_protocol and server_protocol and client_protocol != server_protocol:
+            self.connection_status_var.set(
+                f"❌ Протокол не совпадает: клиент {client_protocol}, сервер {server_protocol}"
+            )
+            self.status_label.configure(text_color="red")
+            self.node.vpn_client_peer_id = None
+            self.node.vpn_client_peer_ip = ""
+            return
+
+        self.connection_status_var.set(f"✅ Подключено к {server_node.name}")
+        self.status_label.configure(text_color="green")
+        # Сохраняем ID сервера для связи
+        self.node.vpn_client_peer_id = server_node.id
+        self.node.vpn_client_peer_ip = server_ip
+
+    def fill_test_data(self):
+        """Заполняет поля VPN-клиента и VPN-сервера тестовыми данными
+        для быстрой проверки функциональности (промт 8 №1).
+        """
+        # Клиент
+        try:
+            self.client_server_ip.delete(0, tk.END)
+            self.client_server_ip.insert(0, "10.8.0.1")
+            self.client_port.delete(0, tk.END)
+            self.client_port.insert(0, "51820")
+            self.client_virtual_ip.delete(0, tk.END)
+            self.client_virtual_ip.insert(0, "10.8.0.2")
+            self.client_virtual_mask.delete(0, tk.END)
+            self.client_virtual_mask.insert(0, "24")
+            if hasattr(self, "client_protocol_var"):
+                self.client_protocol_var.set(VPN_DEFAULT_PROTOCOL)
+        except Exception:
+            pass
+
+        # Сервер
+        try:
+            self.server_virtual_ip.delete(0, tk.END)
+            self.server_virtual_ip.insert(0, "10.8.0.1")
+            self.server_virtual_mask.delete(0, tk.END)
+            self.server_virtual_mask.insert(0, "24")
+            self.server_port.delete(0, tk.END)
+            self.server_port.insert(0, "51820")
+            self.server_network.delete(0, tk.END)
+            self.server_network.insert(0, "192.168.100.0")
+            self.server_network_mask.delete(0, tk.END)
+            self.server_network_mask.insert(0, "24")
+            if hasattr(self, "server_protocol_var"):
+                self.server_protocol_var.set(VPN_DEFAULT_PROTOCOL)
+        except Exception:
+            pass
+
+        # Если оба блока включены — сразу проверим соединение
+        if self.client_enabled_var.get():
+            self.dialog.after(100, self.check_connection)
 
     def on_client_toggle(self):
         """Включает/выключает настройки клиента."""
@@ -536,16 +606,28 @@ class VPNConfigDialog:
                 messagebox.showerror("Ошибка", "Порт должен быть числом от 1 до 65535!")
                 return
 
+            # Пытаемся привязать клиента к серверу. Успешная привязка
+            # требует совпадения IP+порта И одного и того же VPN-протокола
+            # (промт 8 №3 — разные протоколы не могут поднять туннель).
+            client_protocol = self.client_protocol_var.get() or VPN_DEFAULT_PROTOCOL
             server_node = self.find_vpn_server()
+            peer_ok = False
             if server_node:
                 server_port = getattr(server_node, 'vpn_server_port', None)
+                server_protocol = getattr(server_node, 'vpn_server_protocol', '') or ''
                 if server_port and str(server_port) == port:
-                    self.node.vpn_client_peer_id = server_node.id
-                    self.node.vpn_client_peer_ip = server_ip
-                else:
-                    self.node.vpn_client_peer_id = None
-                    self.node.vpn_client_peer_ip = ""
-            else:
+                    if server_protocol and server_protocol != client_protocol:
+                        messagebox.showwarning(
+                            "Протокол не совпадает",
+                            f"На сервере «{server_node.name}» настроен протокол "
+                            f"{server_protocol}, а клиент использует {client_protocol}.\n"
+                            f"Туннель не будет установлен — сначала выровняйте протокол."
+                        )
+                    else:
+                        self.node.vpn_client_peer_id = server_node.id
+                        self.node.vpn_client_peer_ip = server_ip
+                        peer_ok = True
+            if not peer_ok:
                 self.node.vpn_client_peer_id = None
                 self.node.vpn_client_peer_ip = ""
 
