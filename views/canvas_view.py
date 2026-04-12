@@ -507,6 +507,9 @@ class CanvasView:
         self.btn_connectivity = self._make_sidebar_button(
             control_frame, "📊  Анализ связности", self.show_connectivity_report, variant="accent"
         )
+        self.btn_osi_decomposition = self._make_sidebar_button(
+            control_frame, "🔬  Схема ЭМВОС", self.show_osi_decomposition, variant="accent"
+        )
 
         self._sidebar_section_label(control_frame, "НАСТРОЙКИ")
         self.btn_grid = self._make_sidebar_button(
@@ -520,7 +523,7 @@ class CanvasView:
         self._control_buttons = [
             self.btn_add_zone, self.btn_add_node, self.btn_create_link,
             self.btn_delete_link, self.btn_delete, self.btn_clear,
-            self.btn_connectivity, self.btn_grid, self.btn_scale,
+            self.btn_connectivity, self.btn_osi_decomposition, self.btn_grid, self.btn_scale,
         ]
 
         # --- Spacer (растягивается, чтобы прижать theme-toggle и статус к низу) ---
@@ -764,6 +767,11 @@ class CanvasView:
         ).pack(side=tk.RIGHT)
 
         style_dialog(hint_window, width=660, height=280)
+
+    def show_osi_decomposition(self):
+        """Открывает окно схемы разложения топологии по ЭМВОС."""
+        from views.osi_canvas_view import show_osi_decomposition
+        show_osi_decomposition(self.root, self.board)
 
     def show_connectivity_report(self):
         """Показывает отчёт о сетевой связности в табличном виде."""

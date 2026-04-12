@@ -606,7 +606,79 @@ class NodeCreationDialog:
             width=110, height=40, corner_radius=10
         ).pack(side=tk.RIGHT)
 
+        # Кнопка загрузки пресета (слева)
+        if not self.is_edit_mode:
+            self._add_preset_button(button_frame)
+
         self.center_window()
+
+    def _add_preset_button(self, parent):
+        """Добавляет кнопку с меню пресетов для быстрого заполнения."""
+        from config.presets import get_presets_for_type
+        from utils.theme import color
+
+        current_type = self.preselected_type if self.preselected_type else "АРМ"
+        presets = get_presets_for_type(current_type)
+        if not presets:
+            return
+
+        self._presets_data = {p["name"]: p["preset"] for p in presets}
+
+        def show_preset_menu():
+            menu = tk.Menu(parent, tearoff=0)
+            for p in presets:
+                name = p["name"]
+                menu.add_command(label=name,
+                                 command=lambda n=name: self._on_preset_selected(n))
+            try:
+                btn = self._preset_btn
+                menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() - len(presets) * 25)
+            except Exception:
+                pass
+
+        self._preset_btn = ctk.CTkButton(
+            parent, text="📦 Загрузить пресет",
+            command=show_preset_menu, width=200, height=40,
+            fg_color=color("accent"), hover_color=color("accent_hover"),
+            text_color="#FFFFFF", corner_radius=10, font=("Arial", 12, "bold")
+        )
+        self._preset_btn.pack(side=tk.LEFT)
+
+    def _on_preset_selected(self, choice: str):
+        """Применяет выбранный пресет: заполняет имя, порты, hardware/software.
+
+        Сохраняет данные пресета в _preset_applied — они будут использованы
+        в create_node напрямую, минуя вкладки (потому что вкладки не умеют
+        принимать готовые значения извне).
+        """
+        preset = self._presets_data.get(choice)
+        if not preset:
+            return
+
+        # Имя узла
+        self.node_name_var.set(preset.get("name", ""))
+
+        # Порты
+        self.current_ports = [p.copy() for p in preset.get("ports", [])]
+
+        # Запоминаем данные пресета для create_node
+        self._preset_applied = {
+            "hardware": list(preset.get("hardware", [])),
+            "software": list(preset.get("software", [])),
+        }
+
+        # Обновляем вкладку «Сеть» чтобы показать новые порты
+        try:
+            self.update_tabs()
+        except Exception:
+            pass
+
+        from tkinter import messagebox
+        messagebox.showinfo("Пресет загружен",
+                            f"Пресет «{choice}» применён.\n"
+                            f"Порты: {len(self.current_ports)}\n"
+                            f"Hardware: {len(preset.get('hardware', []))}\n"
+                            f"Software: {len(preset.get('software', []))}")
 
     def update_zone_frame(self):
         """Обновляет фрейм выбора зоны (промт-стиль2: dropdown вместо радиокнопок)."""
@@ -1582,51 +1654,68 @@ class NodeCreationDialog:
 
         # Собираем компоненты
         properties = {"hardware": [], "software": [], "network": []}
-        hardware_items = []
-        software_items = []
 
-        for attr_name in dir(self):
-            if attr_name.endswith('_var') and not attr_name.startswith('node_') and not attr_name.startswith('zone_'):
-                var = getattr(self, attr_name)
-                if hasattr(var, 'get'):
+        # Если применён пресет — берём данные из него напрямую
+        if hasattr(self, '_preset_applied') and self._preset_applied:
+            properties["hardware"] = list(self._preset_applied.get("hardware", []))
+            properties["software"] = list(self._preset_applied.get("software", []))
+        else:
+            # Иначе — собираем из вкладок через _var переменные
+            hardware_items = []
+            software_items = []
+
+            # Белый список префиксов для сбора (чтобы zone_var и прочее не попадало)
+            _skip_prefixes = ("node_", "zone_", "_zone", "connection_",
+                              "new_port", "wifi_config", "preset", "interface_",
+                              "action_", "direction_", "protocol_", "metric_",
+                              "client_", "server_", "notify_", "status_",
+                              "search_", "count_")
+
+            for attr_name in dir(self):
+                if attr_name.endswith('_var'):
+                    if any(attr_name.startswith(p) for p in _skip_prefixes):
+                        continue
+                    var = getattr(self, attr_name, None)
+                    if var is None or not hasattr(var, 'get'):
+                        continue
                     value = var.get()
-                    if value:
-                        if "processor" in attr_name or "cpu" in attr_name:
-                            hardware_items.append(f"Процессор: {value}")
-                        elif "gpu" in attr_name and "driver" not in attr_name:
-                            hardware_items.append(f"Видеоконтроллер: {value}")
-                        elif "motherboard" in attr_name:
-                            hardware_items.append(f"Материнская плата: {value}")
-                        elif "hdd" in attr_name or "storage" in attr_name:
-                            hardware_items.append(f"HDD/SSD: {value}")
-                        elif "mouse" in attr_name:
-                            software_items.append(f"Мышь: {value}")
-                        elif "keyboard" in attr_name:
-                            software_items.append(f"Клавиатура: {value}")
-                        elif "printer" in attr_name:
-                            software_items.append(f"Принтер: {value}")
-                        elif "monitor" in attr_name:
-                            software_items.append(f"Монитор: {value}")
-                        elif "os" in attr_name:
-                            software_items.append(f"ОС: {value}")
-                        elif "app" in attr_name:
-                            software_items.append(f"Приложение: {value}")
-                        else:
-                            software_items.append(value)
+                    if not value or not isinstance(value, str) or not value.strip():
+                        continue
 
-            # Обработка множественного выбора (_selected списки)
-            if attr_name.endswith('_selected') and not attr_name.startswith('_'):
-                selected_list = getattr(self, attr_name)
-                if isinstance(selected_list, list):
-                    for value in selected_list:
-                        if value:
-                            if "app" in attr_name:
-                                software_items.append(f"Приложение: {value}")
-                            else:
-                                software_items.append(value)
+                    if "processor" in attr_name or "cpu" in attr_name:
+                        hardware_items.append(f"Процессор: {value}")
+                    elif "gpu" in attr_name and "driver" not in attr_name:
+                        hardware_items.append(f"Видеоконтроллер: {value}")
+                    elif "motherboard" in attr_name:
+                        hardware_items.append(f"Материнская плата: {value}")
+                    elif "hdd" in attr_name or "storage" in attr_name:
+                        hardware_items.append(f"HDD/SSD: {value}")
+                    elif "mouse" in attr_name:
+                        software_items.append(f"Мышь: {value}")
+                    elif "keyboard" in attr_name:
+                        software_items.append(f"Клавиатура: {value}")
+                    elif "printer" in attr_name:
+                        software_items.append(f"Принтер: {value}")
+                    elif "monitor" in attr_name:
+                        software_items.append(f"Монитор: {value}")
+                    elif "os" in attr_name:
+                        software_items.append(f"ОС: {value}")
+                    elif "app" in attr_name:
+                        software_items.append(f"Приложение: {value}")
 
-        properties["hardware"] = hardware_items
-        properties["software"] = software_items
+                # Множественный выбор
+                if attr_name.endswith('_selected') and not attr_name.startswith('_'):
+                    selected_list = getattr(self, attr_name, None)
+                    if isinstance(selected_list, list):
+                        for value in selected_list:
+                            if value:
+                                if "app" in attr_name:
+                                    software_items.append(f"Приложение: {value}")
+                                else:
+                                    software_items.append(value)
+
+            properties["hardware"] = hardware_items
+            properties["software"] = software_items
 
         # Имя узла
         node_name = self.node_name_var.get().strip()

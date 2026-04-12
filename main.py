@@ -231,6 +231,12 @@ def main():
     def on_loading_complete(splash):
         """Вызывается когда загрузка завершена."""
         try:
+            # Останавливаем все after-колбеки перед destroy,
+            # чтобы Python 3.13 не падал на deletecommand
+            splash.after_cancel("all")
+        except Exception:
+            pass
+        try:
             splash.destroy()
         except Exception:
             pass
@@ -268,6 +274,18 @@ def main():
     # Показываем splash screen и начинаем загрузку
     root.after(100, lambda: show_splash_and_load(on_loading_complete))
 
+    # Защита от бага Python 3.13 при закрытии: перехватываем ошибки destroy
+    def _on_closing():
+        try:
+            root.after_cancel("all")
+        except Exception:
+            pass
+        try:
+            root.destroy()
+        except Exception:
+            pass
+
+    root.protocol("WM_DELETE_WINDOW", _on_closing)
     root.mainloop()
 
 
