@@ -1,28 +1,29 @@
 """
-Модуль базы данных CVE (Common Vulnerabilities and Exposures)
+Модуль базы данных CVE — версия для нормализованной БД v2.
 
-Содержит класс CVEDatabase для работы с базой уязвимостей.
+Все данные берутся из `cve_database_v2.db` через SQL-запросы с JOIN.
+Никаких статических списков — всё из реальных данных NVD NIST.
+
+Таблицы БД:
+  cve_entries  — CVE-записи (id, описание, CVSS v2/v3/v4, CWE, дата)
+  cpe_entries  — уникальные CPE (part, vendor, product, version)
+  cve_cpe_map  — связь M:N между CVE и CPE
 """
 
 import os
 import sqlite3
 from typing import List, Dict, Optional
 
-# Импорт из utils (правильный путь)
-from utils.cpe_utils import extract_cpe_components, parse_cpe_string, format_cpe_for_display
+from utils.cpe_utils import format_cpe_for_display
 
-# Базовая папка (где лежит этот файл)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 class CVEDatabase:
-    """
-    Синглтон для работы с базой данных CVE.
-    """
+    """Синглтон для работы с нормализованной CVE базой данных."""
 
     _instance = None
     _connection = None
-    _parsed_cpes = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -34,615 +35,581 @@ class CVEDatabase:
             return
 
         if db_path is None:
-            db_path = os.path.join(BASE_DIR, "cve_database.db")
+            db_path = os.path.join(BASE_DIR, "cve_database_v2.db")
+            if not os.path.exists(db_path):
+                # Fallback на старую БД
+                db_path = os.path.join(BASE_DIR, "cve_database.db")
 
         if not os.path.exists(db_path):
-            raise FileNotFoundError(f"❌ cve_database.db не найден: {db_path}")
+            raise FileNotFoundError(f"БД CVE не найдена: {db_path}")
 
         print(f"[CVE] Подключение к: {db_path}")
-
         self._connection = sqlite3.connect(db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
 
-    # =========================================================
-    # 🔹 CPE ПАРСИНГ
-    # =========================================================
+    # =================================================================
+    # УНИВЕРСАЛЬНЫЙ HELPER ДЛЯ ЗАПРОСОВ К CPE
+    # =================================================================
 
-    def _parse_cpe(self, cpe: str) -> Optional[Dict]:
-        parts = cpe.split(":")
-        if len(parts) < 6:
-            return None
-        return {
-            "part": parts[2],
-            "vendor": parts[3],
-            "product": parts[4],
-            "version": parts[5],
-        }
+    def _query_components(self, part: str = None,
+                          vendors: list = None,
+                          product_like: list = None,
+                          product_not_like: list = None,
+                          search: str = "",
+                          limit: int = 5000) -> List[str]:
+        """SQL-запрос к cpe_entries с гибкой фильтрацией.
 
-    def _load_all_cpes(self) -> List[Dict]:
-        if self._parsed_cpes is not None:
-            return self._parsed_cpes
+        Args:
+            part: 'h' (hardware), 'o' (OS), 'a' (application)
+            vendors: список вендоров (точное совпадение, lowercase)
+            product_like: список подстрок для LIKE по product
+            product_not_like: список подстрок для NOT LIKE
+            search: пользовательский поиск (финальная фильтрация)
+            limit: максимум строк
 
-        print("[CVE] Парсинг CPE...")
+        Returns:
+            List[str] — отформатированные строки "Vendor Product Version"
+        """
+        conditions = []
+        params = []
+
+        if part:
+            conditions.append("part = ?")
+            params.append(part)
+
+        if vendors:
+            placeholders = ",".join("?" * len(vendors))
+            conditions.append(f"vendor IN ({placeholders})")
+            params.extend(vendors)
+
+        if product_like:
+            like_clauses = " OR ".join(["product LIKE ?" for _ in product_like])
+            conditions.append(f"({like_clauses})")
+            params.extend([f"%{p}%" for p in product_like])
+
+        if product_not_like:
+            for ex in product_not_like:
+                conditions.append("product NOT LIKE ?")
+                params.append(f"%{ex}%")
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+
+        query = f"""
+            SELECT DISTINCT vendor, product, version
+            FROM cpe_entries
+            WHERE {where}
+            ORDER BY vendor, product, version
+            LIMIT ?
+        """
+        params.append(limit)
 
         cursor = self._connection.cursor()
-        cursor.execute("SELECT cpe_list FROM cve_data WHERE cpe_list IS NOT NULL")
+        cursor.execute(query, params)
 
-        parsed = []
-        for row in cursor.fetchall():
-            cpe_list = row["cpe_list"]
-            if not cpe_list:
-                continue
-            for cpe in cpe_list.split(","):
-                cpe = cpe.strip()
-                p = self._parse_cpe(cpe)
-                if p:
-                    parsed.append(p)
-
-        print(f"[CVE] Загружено CPE: {len(parsed)}")
-        self._parsed_cpes = parsed
-        return parsed
-
-    # =========================================================
-    # 🔹 ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-    # =========================================================
-
-    def _format_cpe(self, cpe: Dict) -> str:
-        return format_cpe_for_display(cpe["vendor"], cpe["product"], cpe["version"])
+        result = [format_cpe_for_display(r[0], r[1], r[2]) for r in cursor.fetchall()]
+        return self._apply_search(result, search)
 
     def _apply_search(self, data: List[str], search: str = "") -> List[str]:
         if not search:
             return sorted(set(data))
-        search = search.lower()
-        return sorted(set([d for d in data if search in d.lower()]))
+        search_lower = search.lower()
+        return sorted(set(d for d in data if search_lower in d.lower()))
 
-    # =========================================================
-    # 🔹 HARDWARE
-    # =========================================================
+    # =================================================================
+    # HARDWARE — ПРОЦЕССОРЫ
+    # =================================================================
 
     def get_processors(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "intel" in v and any(x in p for x in ["core", "pentium", "celeron", "atom"]):
-                result.append(self._format_cpe(cpe))
-            elif "amd" in v and any(x in p for x in ["ryzen", "athlon", "fx", "a-series"]):
-                result.append(self._format_cpe(cpe))
-            elif "qualcomm" in v and "snapdragon" in p:
-                result.append(self._format_cpe(cpe))
-            elif "mediatek" in v and any(x in p for x in ["dimensity", "helio"]):
-                result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
-
-    def get_graphics_cards(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "nvidia" in v and any(x in p for x in ["geforce", "rtx", "quadro", "tesla", "titan"]):
-                result.append(self._format_cpe(cpe))
-            elif "amd" in v and any(x in p for x in ["radeon", "rx", "firepro"]):
-                result.append(self._format_cpe(cpe))
-            elif "intel" in v and any(x in p for x in ["iris", "uhd", "hd graphics"]):
-                result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
-
-    def get_storage_devices(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            if any(x in p for x in ["software", "driver", "firmware", "firewall"]):
-                continue
-            if any(x in p for x in ["ssd", "hdd", "nvme", "storage", "hard drive"]):
-                result.append(self._format_cpe(cpe))
-            elif any(x in v for x in ["western digital", "seagate", "kingston", "crucial", "sandisk"]):
-                result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
-
-    def get_motherboards(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            if any(x in p for x in ["software", "driver", "firmware", "firewall"]):
-                continue
-            if any(x in p for x in ["motherboard", "mainboard", "board"]):
-                result.append(self._format_cpe(cpe))
-            elif any(x in v for x in ["asus", "gigabyte", "msi", "asrock", "biostar", "evga"]):
-                if not any(x in p for x in ["gpu", "graphics", "video"]):
-                    result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
-
-    def get_monitors(self, search: str = "") -> List[str]:
-        keywords = ["monitor", "display", "lcd", "led", "screen"]
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            if any(k in cpe["product"] for k in keywords):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_printers(self, search: str = "") -> List[str]:
-        keywords = ["printer", "laserjet", "deskjet", "epson", "canon", "xerox"]
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            if any(k in cpe["product"] for k in keywords):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    # =========================================================
-    # 🔹 OPERATING SYSTEMS
-    # =========================================================
-
-    def get_client_operating_systems(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"]
-            p = cpe["product"]
-            if any(x in v for x in ["microsoft", "apple", "canonical", "debian", "linux"]):
-                if not any(x in p for x in ["server", "enterprise"]):
-                    result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_server_operating_systems(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            p = cpe["product"]
-            if any(x in p for x in ["server", "enterprise", "rhel", "ubuntu"]):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    # =========================================================
-    # 🔹 NETWORK HARDWARE
-    # =========================================================
-
-    def get_router_hardware(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            if any(x in p for x in ["software", "os", "ios", "junos", "vrp"]):
-                continue
-            if any(x in p for x in ["router", "routing"]):
-                result.append(self._format_cpe(cpe))
-            elif any(x in v for x in ["cisco", "juniper", "huawei", "mikrotik", "ubiquiti"]):
-                if not any(x in p for x in ["switch", "modem"]):
-                    result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
-
-    def get_switch_hardware(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            if any(x in p for x in ["software", "os", "ios", "nx-os", "catos"]):
-                continue
-            if any(x in p for x in ["switch", "switching"]):
-                result.append(self._format_cpe(cpe))
-            elif any(x in v for x in ["cisco", "juniper", "huawei", "hp", "arista", "brocade"]):
-                if not any(x in p for x in ["router", "firewall"]):
-                    result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="h",
+            vendors=["intel", "amd"],
+            product_like=["core", "xeon", "ryzen", "athlon", "epyc",
+                          "pentium", "celeron", "atom", "threadripper",
+                          "opteron", "phenom", "sempron", "turion"],
+            search=search
+        )
 
     def get_server_processors(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "intel" in v and any(x in p for x in ["xeon", "itanium"]):
-                result.append(self._format_cpe(cpe))
-            elif "amd" in v and any(x in p for x in ["epyc", "opteron"]):
-                result.append(self._format_cpe(cpe))
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="h",
+            vendors=["intel", "amd"],
+            product_like=["xeon", "epyc", "opteron"],
+            search=search
+        )
 
-    # =========================================================
-    # 🔹 NETWORK OS
-    # =========================================================
+    # =================================================================
+    # HARDWARE — ВИДЕОКАРТЫ
+    # =================================================================
 
-    def get_cisco_ios(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "cisco" in v and ("ios" in p or "ios-xe" in p):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
+    def get_graphics_cards(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["nvidia", "amd", "intel"],
+            product_like=["geforce", "rtx_", "gtx_", "quadro", "tesla_",
+                          "radeon", "instinct", "firepro",
+                          "iris_", "uhd_graphics", "hd_graphics", "arc_a"],
+            product_not_like=["microarchitectural", "processor", "ethernet",
+                              "xeon", "core_", "atom", "celeron", "pentium"],
+            search=search
+        )
 
-    def get_junos(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "juniper" in v and "junos" in p:
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
+    # =================================================================
+    # HARDWARE — ХРАНЕНИЕ ДАННЫХ
+    # =================================================================
 
-    def get_huawei_versions(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "huawei" in v and ("vrp" in p or "vrp_" in p):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_other_router_os(self, search: str = "") -> List[str]:
-        result = []
-        router_os = ["mikrotik routeros", "ubiquiti edgeos", "vyos", "pfsense", "opnsense"]
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            combined = f"{v} {p}"
-            if any(os_name in combined for os_name in router_os):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_cisco_switch_os(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if "cisco" in v and ("ios" in p or "nx-os" in p or "catos" in p):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_managed_switch_os(self, search: str = "") -> List[str]:
-        result = []
-        managed_os = ["procurve", "aruba", "arista", "extreme", "dlink"]
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "o":
-                continue
-            v = cpe["vendor"].lower()
-            p = cpe["product"].lower()
-            if any(os_name in v or os_name in p for os_name in managed_os):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
-
-    def get_unmanaged_switch_os(self, search: str = "") -> List[str]:
-        return self._apply_search(["Неуправляемый коммутатор (без ОС)", "Неконфигурируемый коммутатор"], search)
-
-    # =========================================================
-    # 🔹 RAM AND STORAGE
-    # =========================================================
-
-    def get_ram_options(self, search: str = "") -> List[str]:
-        ram_options = [
-            "4 GB DDR4", "8 GB DDR4", "16 GB DDR4", "32 GB DDR4", "64 GB DDR4",
-            "128 GB DDR4", "256 GB DDR4", "512 GB DDR4", "1 TB DDR4", "2 TB DDR4",
-            "4 GB DDR5", "8 GB DDR5", "16 GB DDR5", "32 GB DDR5", "64 GB DDR5",
-            "128 GB DDR5", "256 GB DDR5", "512 GB DDR5", "1 TB DDR5"
-        ]
-        return self._apply_search(ram_options, search)
+    def get_storage_devices(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["samsung", "western_digital", "seagate", "crucial",
+                     "kingston", "intel", "sandisk", "toshiba", "hgst",
+                     "micron", "sk_hynix", "corsair", "adata"],
+            product_like=["ssd", "hdd", "nvme", "solid_state", "hard_disk",
+                          "storage_device", "860_evo", "870_evo", "980_pro",
+                          "970_evo", "850_evo", "840_evo", "850_pro",
+                          "t5_portable", "t7_portable", "mx500", "bx500",
+                          "barracuda", "ironwolf", "wd_blue", "wd_black",
+                          "wd_red", "my_passport", "my_book"],
+            product_not_like=["processor", "galaxy", "chromebook", "watch",
+                              "gear", "nuc", "ethernet", "driver",
+                              "commander", "lighting_node", "phone",
+                              "tablet", "laptop", "notebook"],
+            search=search
+        )
 
     def get_server_storage(self, search: str = "") -> List[str]:
-        storage_options = [
-            "240 GB SSD", "480 GB SSD", "960 GB SSD", "1.92 TB SSD", "3.84 TB SSD",
-            "7.68 TB SSD", "15.36 TB SSD", "1 TB HDD", "2 TB HDD", "4 TB HDD",
-            "8 TB HDD", "12 TB HDD", "16 TB HDD", "NVMe 1 TB", "NVMe 2 TB",
-            "NVMe 4 TB", "NVMe 8 TB", "RAID 1 (2 диска)", "RAID 5 (3+ дисков)",
-            "RAID 6 (4+ дисков)", "RAID 10 (зеркалирование + чередование)"
-        ]
-        return self._apply_search(storage_options, search)
+        return self._query_components(
+            part="h",
+            vendors=["dell", "hp", "hpe", "ibm", "netapp", "emc",
+                     "hitachi", "pure_storage", "samsung", "seagate",
+                     "western_digital", "intel", "micron"],
+            product_like=["storage", "san", "nas", "raid", "array",
+                          "disk", "ssd", "nvme", "powervault",
+                          "proliant", "storageworks"],
+            search=search
+        )
+
+    # =================================================================
+    # HARDWARE — МАТЕРИНСКИЕ ПЛАТЫ
+    # =================================================================
+
+    def get_motherboards(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["asus", "asustek", "gigabyte", "msi",
+                     "asrock", "supermicro", "intel", "biostar",
+                     "evga", "foxconn"],
+            product_like=["motherboard", "mainboard", "rog_strix",
+                          "rog_maximus", "rog_crosshair",
+                          "prime_", "tuf_gaming", "aorus_",
+                          "meg_", "mpg_", "mag_",
+                          "x570", "b550", "z690", "z790", "b660",
+                          "x670", "b650", "h670", "h610"],
+            product_not_like=["programmable", "fpga", "acceleration",
+                              "processor", "ethernet", "nuc", "driver"],
+            search=search
+        )
+
+    # =================================================================
+    # HARDWARE — МОНИТОРЫ И ПРИНТЕРЫ
+    # =================================================================
+
+    def get_monitors(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["samsung", "lg", "dell", "hp", "acer", "asus",
+                     "benq", "viewsonic", "philips", "aoc", "lenovo"],
+            product_like=["monitor", "display", "lcd", "led", "oled"],
+            search=search
+        )
+
+    def get_printers(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["hp", "canon", "epson", "brother", "xerox",
+                     "lexmark", "samsung", "ricoh", "kyocera",
+                     "sharp", "konica_minolta", "oki"],
+            product_like=["printer", "laserjet", "officejet", "deskjet",
+                          "pixma", "workforce", "mfc", "ecosys",
+                          "imagerunner", "pagewide", "envy"],
+            search=search
+        )
+
+    # =================================================================
+    # HARDWARE — СЕТЕВОЕ ОБОРУДОВАНИЕ
+    # =================================================================
+
+    def get_router_hardware(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["cisco", "juniper", "huawei", "mikrotik",
+                     "ubiquiti", "netgear", "tp-link", "asus",
+                     "dlink", "zyxel", "fortinet", "arista"],
+            product_like=["router", "gateway", "asr", "isr", "rv",
+                          "srx", "mx", "ex", "ar", "ne"],
+            product_not_like=["switch", "modem"],
+            search=search
+        )
+
+    def get_switch_hardware(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["cisco", "juniper", "huawei", "hp", "hpe",
+                     "arista", "netgear", "dlink", "zyxel",
+                     "tp-link", "ubiquiti", "extreme_networks"],
+            product_like=["switch", "catalyst", "nexus", "sg",
+                          "procurve", "aruba", "comware",
+                          "quidway", "s5700", "s5720"],
+            search=search
+        )
 
     def get_network_cards(self, search: str = "") -> List[str]:
-        result = []
-        nics = [
-            "1 GbE (1 порт)", "1 GbE (2 порта)", "1 GbE (4 порта)",
-            "10 GbE SFP+ (1 порт)", "10 GbE SFP+ (2 порта)", "10 GbE SFP+ (4 порта)",
-            "25 GbE SFP28 (1 порт)", "25 GbE SFP28 (2 порта)",
-            "40 GbE QSFP+ (1 порт)", "40 GbE QSFP+ (2 порта)",
-            "100 GbE QSFP28 (1 порт)", "100 GbE QSFP28 (2 порта)",
-            "FC 16 Gb (HBA)", "FC 32 Gb (HBA)",
-            "Intel I350-T4", "Intel X710-DA2", "Mellanox ConnectX-4", "Broadcom NetXtreme"
-        ]
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "h":
-                continue
-            p = cpe["product"].lower()
-            v = cpe["vendor"].lower()
-            if any(x in p for x in ["network card", "nic", "ethernet adapter", "network adapter"]):
-                result.append(self._format_cpe(cpe))
-            elif any(x in v for x in ["intel", "broadcom", "mellanox", "realtek", "qualcomm"]):
-                if any(x in p for x in ["ethernet", "network", "nic", "adapter"]):
-                    result.append(self._format_cpe(cpe))
-        result.extend(nics)
-        result = list(dict.fromkeys(result))
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="h",
+            vendors=["intel", "broadcom", "realtek", "mellanox",
+                     "nvidia", "qualcomm", "marvell", "chelsio"],
+            product_like=["ethernet", "network", "nic", "adapter",
+                          "wifi", "wireless", "i210", "i225", "i350",
+                          "x520", "x540", "x550", "x710", "xxv710",
+                          "bcm", "connectx", "infiniband"],
+            search=search
+        )
 
-    # =========================================================
-    # 🔹 VIRTUALIZATION
-    # =========================================================
+    # =================================================================
+    # HARDWARE — ОПЕРАТИВНАЯ ПАМЯТЬ
+    # =================================================================
 
-    def get_vmware_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "VMware ESXi 6.5", "VMware ESXi 6.7", "VMware ESXi 7.0", "VMware ESXi 8.0",
-            "VMware vSphere 6.5", "VMware vSphere 6.7", "VMware vSphere 7.0", "VMware vSphere 8.0"
-        ]
-        return self._apply_search(versions, search)
+    def get_ram_options(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="h",
+            vendors=["samsung", "sk_hynix", "micron", "kingston",
+                     "corsair", "gskill", "crucial", "patriot",
+                     "team_group", "adata"],
+            product_like=["ddr", "memory", "ram", "dimm", "sodimm",
+                          "rdimm", "lrdimm", "ecc"],
+            search=search
+        )
 
-    def get_hyperv_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "Hyper-V Server 2012 R2", "Hyper-V Server 2016", "Hyper-V Server 2019", "Hyper-V Server 2022",
-            "Windows Server 2012 R2 (с Hyper-V)", "Windows Server 2016 (с Hyper-V)",
-            "Windows Server 2019 (с Hyper-V)", "Windows Server 2022 (с Hyper-V)"
-        ]
-        return self._apply_search(versions, search)
+    # =================================================================
+    # ОПЕРАЦИОННЫЕ СИСТЕМЫ — КЛИЕНТСКИЕ
+    # =================================================================
 
-    def get_proxmox_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "Proxmox VE 6.4", "Proxmox VE 7.0", "Proxmox VE 7.1", "Proxmox VE 7.2",
-            "Proxmox VE 7.3", "Proxmox VE 7.4", "Proxmox VE 8.0", "Proxmox VE 8.1", "Proxmox VE 8.2"
-        ]
-        return self._apply_search(versions, search)
+    def get_client_operating_systems(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["microsoft", "apple", "canonical", "debian",
+                     "fedoraproject", "linuxmint", "opensuse",
+                     "manjaro", "google"],
+            product_like=["windows_10", "windows_11", "windows_7",
+                          "windows_8", "windows_xp", "windows_vista",
+                          "mac_os", "macos", "os_x",
+                          "ubuntu", "debian", "fedora", "linux_mint",
+                          "opensuse", "manjaro",
+                          "chrome_os", "android"],
+            product_not_like=["server"],
+            search=search
+        )
 
-    def get_kvm_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "KVM (ядро Linux 4.x)", "KVM (ядро Linux 5.x)", "KVM (ядро Linux 6.x)",
-            "Red Hat Virtualization 4.4", "Red Hat Virtualization 4.5", "oVirt 4.5"
-        ]
-        return self._apply_search(versions, search)
+    # =================================================================
+    # ОПЕРАЦИОННЫЕ СИСТЕМЫ — СЕРВЕРНЫЕ
+    # =================================================================
 
-    def get_citrix_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "Citrix Hypervisor 8.2", "Citrix Hypervisor 8.3", "Citrix Hypervisor 9.0",
-            "XenServer 7.5", "XenServer 7.6", "XenServer 8.0"
-        ]
-        return self._apply_search(versions, search)
+    def get_server_operating_systems(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["microsoft", "canonical", "redhat", "centos",
+                     "debian", "suse", "oracle", "rocky",
+                     "almalinux", "amazon", "vmware"],
+            product_like=["windows_server", "ubuntu", "enterprise_linux",
+                          "centos", "debian", "suse", "oracle_linux",
+                          "rocky", "alma", "linux", "photon"],
+            search=search
+        )
 
-    def get_containerizers(self, search: str = "") -> List[str]:
-        containerizers = ["Docker", "Podman", "containerd", "CRI-O", "LXC", "LXD", "rkt", "Singularity/Apptainer"]
-        return self._apply_search(containerizers, search)
+    # =================================================================
+    # ОПЕРАЦИОННЫЕ СИСТЕМЫ — СЕТЕВОЕ ОБОРУДОВАНИЕ
+    # =================================================================
 
-    def get_windows_server_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "Windows Server 2012 R2", "Windows Server 2016", "Windows Server 2019",
-            "Windows Server 2022", "Windows Server 2025"
-        ]
-        return self._apply_search(versions, search)
+    def get_cisco_ios(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["cisco"],
+            product_like=["ios", "ios_xe", "ios_xr"],
+            product_not_like=["nx-os", "asa"],
+            search=search
+        )
 
-    def get_linux_server_versions(self, search: str = "") -> List[str]:
-        versions = [
-            "Ubuntu Server 20.04 LTS", "Ubuntu Server 22.04 LTS", "Ubuntu Server 24.04 LTS",
-            "Debian 11 (Bullseye)", "Debian 12 (Bookworm)", "Red Hat Enterprise Linux 8",
-            "Red Hat Enterprise Linux 9", "CentOS 7", "CentOS Stream 8", "CentOS Stream 9",
-            "Rocky Linux 8", "Rocky Linux 9", "AlmaLinux 8", "AlmaLinux 9",
-            "SUSE Linux Enterprise Server 15", "Oracle Linux 8", "Oracle Linux 9"
-        ]
-        return self._apply_search(versions, search)
+    def get_junos(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["juniper"],
+            product_like=["junos"],
+            search=search
+        )
 
-    # =========================================================
-    # 🔹 APPLICATION SOFTWARE
-    # =========================================================
+    def get_huawei_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["huawei"],
+            product_like=["vrp", "harmonyos", "emui", "magic_ui"],
+            search=search
+        )
+
+    def get_other_router_os(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["mikrotik", "ubiquiti", "openwrt", "vyos",
+                     "netgate", "pfsense", "opnsense"],
+            search=search
+        )
+
+    def get_cisco_switch_os(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["cisco"],
+            product_like=["nx-os", "ios", "cat", "asa"],
+            search=search
+        )
+
+    def get_managed_switch_os(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["hp", "hpe", "arista", "aruba",
+                     "extreme_networks", "juniper", "huawei"],
+            product_like=["procurve", "aruba", "comware", "eos",
+                          "nos", "exos", "junos", "vrp"],
+            search=search
+        )
+
+    def get_unmanaged_switch_os(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["netgear", "dlink", "tp-link", "zyxel", "tenda"],
+            search=search
+        )
+
+    # =================================================================
+    # ПРИКЛАДНОЕ ПО
+    # =================================================================
 
     def get_application_software(self, search: str = "") -> List[str]:
-        keywords = [
-            "office", "chrome", "firefox", "edge", "mysql", "postgres",
-            "oracle", "nginx", "apache", "git", "docker", "kubernetes"
-        ]
-        result = []
-        for cpe in self._load_all_cpes():
-            if cpe["part"] != "a":
-                continue
-            p = cpe["product"].lower()
-            if any(k in p for k in keywords):
-                result.append(self._format_cpe(cpe))
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="a",
+            vendors=["microsoft", "google", "mozilla", "apache",
+                     "oracle", "adobe", "ibm", "sap", "vmware",
+                     "redhat", "postgresql", "mysql", "mariadb",
+                     "elastic", "docker", "nginx", "openssl",
+                     "python", "nodejs", "php", "wordpress",
+                     "libreoffice", "7-zip", "videolan",
+                     "wireshark", "putty", "filezilla"],
+            search=search
+        )
 
-    # =========================================================
-    # 🔹 GPU DRIVERS
-    # =========================================================
+    # =================================================================
+    # ВИРТУАЛИЗАЦИЯ И КОНТЕЙНЕРИЗАЦИЯ
+    # =================================================================
+
+    def get_vmware_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            vendors=["vmware"],
+            product_like=["esxi", "vsphere", "vcenter", "workstation",
+                          "fusion", "player", "nsx", "vrealize",
+                          "horizon", "cloud_foundation"],
+            search=search
+        )
+
+    def get_hyperv_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["microsoft"],
+            product_like=["hyper-v", "windows_server"],
+            search=search
+        )
+
+    def get_proxmox_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            vendors=["proxmox"],
+            search=search
+        )
+
+    def get_kvm_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            vendors=["redhat", "linux", "qemu"],
+            product_like=["kvm", "qemu", "libvirt", "ovirt",
+                          "rhev", "virtualization"],
+            search=search
+        )
+
+    def get_citrix_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            vendors=["citrix"],
+            product_like=["hypervisor", "xenserver", "xen",
+                          "virtual_apps", "workspace"],
+            search=search
+        )
+
+    def get_containerizers(self, search: str = "") -> List[str]:
+        return self._query_components(
+            vendors=["docker", "linuxcontainers", "podman_project",
+                     "kubernetes", "linuxfoundation", "sylabs",
+                     "redhat", "canonical"],
+            product_like=["docker", "containerd", "podman", "cri-o",
+                          "lxc", "lxd", "singularity", "runc",
+                          "buildah", "skopeo"],
+            search=search
+        )
+
+    def get_windows_server_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["microsoft"],
+            product_like=["windows_server"],
+            search=search
+        )
+
+    def get_linux_server_versions(self, search: str = "") -> List[str]:
+        return self._query_components(
+            part="o",
+            vendors=["canonical", "redhat", "centos", "debian",
+                     "suse", "oracle", "rocky", "almalinux",
+                     "amazon", "fedoraproject"],
+            product_like=["ubuntu", "enterprise_linux", "centos",
+                          "debian", "suse", "oracle_linux", "rocky",
+                          "alma", "linux", "fedora"],
+            search=search
+        )
+
+    # =================================================================
+    # ДРАЙВЕРЫ GPU
+    # =================================================================
 
     def get_nvidia_drivers_from_db(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            v = cpe["vendor"]
-            p = cpe["product"]
-            if "nvidia" in v and ("driver" in p or "gpu driver" in p or "display driver" in p):
-                formatted = self._format_cpe(cpe)
-                if formatted not in result:
-                    result.append(formatted)
-            ver = cpe["version"]
-            if "nvidia" in v and ver and ("driver" in ver.lower() or "display" in ver.lower()):
-                formatted = f"NVIDIA {ver}"
-                if formatted not in result:
-                    result.append(formatted)
-        if not result:
-            result = [
-                "NVIDIA GeForce 551.xx Driver", "NVIDIA GeForce 550.xx Driver",
-                "NVIDIA GeForce 545.xx Driver", "NVIDIA GeForce 535.xx Driver",
-                "NVIDIA GeForce 525.xx Driver", "NVIDIA RTX 5000 Driver",
-                "NVIDIA RTX 4000 Driver", "NVIDIA Tesla Driver", "NVIDIA GRID Driver"
-            ]
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="a",
+            vendors=["nvidia"],
+            product_like=["driver", "gpu_display", "cuda", "geforce",
+                          "virtual_gpu"],
+            search=search
+        )
 
     def get_amd_drivers_from_db(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            v = cpe["vendor"]
-            p = cpe["product"]
-            if ("amd" in v or "ati" in v) and ("driver" in p or "radeon driver" in p or "adrenalin" in p):
-                formatted = self._format_cpe(cpe)
-                if formatted not in result:
-                    result.append(formatted)
-            ver = cpe["version"]
-            if ("amd" in v or "ati" in v) and ver and ("driver" in ver.lower() or "adrenalin" in ver.lower()):
-                formatted = f"AMD {ver}"
-                if formatted not in result:
-                    result.append(formatted)
-        if not result:
-            result = [
-                "AMD Adrenalin 24.x.x", "AMD Adrenalin 23.x.x", "AMD Adrenalin 22.x.x",
-                "AMD Pro Edition 23.Q4", "AMD Pro Edition 23.Q3", "AMD ROCm 5.x", "AMD ROCm 6.x"
-            ]
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="a",
+            vendors=["amd"],
+            product_like=["driver", "adrenalin", "radeon_software",
+                          "rocm", "catalyst"],
+            search=search
+        )
 
     def get_intel_drivers_from_db(self, search: str = "") -> List[str]:
-        result = []
-        for cpe in self._load_all_cpes():
-            v = cpe["vendor"]
-            p = cpe["product"]
-            if "intel" in v and ("graphics driver" in p or "display driver" in p or "gpu driver" in p):
-                formatted = self._format_cpe(cpe)
-                if formatted not in result:
-                    result.append(formatted)
-            ver = cpe["version"]
-            if "intel" in v and ver and ("graphics" in ver.lower() or "driver" in ver.lower()):
-                formatted = f"Intel {ver}"
-                if formatted not in result:
-                    result.append(formatted)
-        if not result:
-            result = [
-                "Intel Graphics Driver 31.0.101.xxxx", "Intel Graphics Driver 30.0.101.xxxx",
-                "Intel Graphics Driver 27.20.100.xxxx", "Intel Arc Graphics Driver 31.0.101.xxxx"
-            ]
-        return self._apply_search(result, search)
+        return self._query_components(
+            part="a",
+            vendors=["intel"],
+            product_like=["driver", "graphics", "arc", "uhd",
+                          "iris", "dch"],
+            search=search
+        )
 
-    def get_gpu_drivers_by_vendor(self, vendor: str = "all", search: str = "") -> List[str]:
-        all_drivers = []
-        if vendor in ["nvidia", "all"]:
-            all_drivers.extend(self.get_nvidia_drivers_from_db(search))
-        if vendor in ["amd", "all"]:
-            all_drivers.extend(self.get_amd_drivers_from_db(search))
-        if vendor in ["intel", "all"]:
-            all_drivers.extend(self.get_intel_drivers_from_db(search))
-        seen = set()
-        unique_drivers = []
-        for driver in all_drivers:
-            if driver not in seen:
-                seen.add(driver)
-                unique_drivers.append(driver)
-        return self._apply_search(unique_drivers, search)
+    def get_gpu_drivers_by_vendor(self, vendor: str = "all",
+                                  search: str = "") -> List[str]:
+        if vendor == "nvidia":
+            return self.get_nvidia_drivers_from_db(search)
+        elif vendor == "amd":
+            return self.get_amd_drivers_from_db(search)
+        elif vendor == "intel":
+            return self.get_intel_drivers_from_db(search)
+        else:
+            result = []
+            result.extend(self.get_nvidia_drivers_from_db(search))
+            result.extend(self.get_amd_drivers_from_db(search))
+            result.extend(self.get_intel_drivers_from_db(search))
+            return sorted(set(result))
 
-    def get_gpu_drivers_by_cpe_keyword(self, gpu_name: str = "", search: str = "") -> List[str]:
-        if not gpu_name:
-            return self.get_gpu_drivers_by_vendor("all", search)
-        gpu_lower = gpu_name.lower()
-        vendor = "all"
+    def get_gpu_drivers_by_cpe_keyword(self, gpu_name: str = "",
+                                       search: str = "") -> List[str]:
+        gpu_lower = gpu_name.lower() if gpu_name else ""
         if "nvidia" in gpu_lower or "geforce" in gpu_lower or "rtx" in gpu_lower:
-            vendor = "nvidia"
-        elif "amd" in gpu_lower or "radeon" in gpu_lower or "rx" in gpu_lower:
-            vendor = "amd"
-        elif "intel" in gpu_lower or "arc" in gpu_lower or "iris" in gpu_lower:
-            vendor = "intel"
-        drivers = self.get_gpu_drivers_by_vendor(vendor, search)
-        result = []
-        for driver in drivers:
-            driver_lower = driver.lower()
-            if ("rtx" in gpu_lower and "rtx" in driver_lower) or \
-               ("gtx" in gpu_lower and "gtx" in driver_lower) or \
-               ("radeon" in gpu_lower and "radeon" in driver_lower) or \
-               ("rx" in gpu_lower and "rx" in driver_lower) or \
-               ("arc" in gpu_lower and "arc" in driver_lower):
-                result.append(driver)
-        if not result:
-            result = drivers
-        return self._apply_search(result, search)
+            return self.get_nvidia_drivers_from_db(search)
+        elif "amd" in gpu_lower or "radeon" in gpu_lower:
+            return self.get_amd_drivers_from_db(search)
+        elif "intel" in gpu_lower or "iris" in gpu_lower or "uhd" in gpu_lower:
+            return self.get_intel_drivers_from_db(search)
+        return self.get_gpu_drivers_by_vendor("all", search)
 
-    # =========================================================
-    # 🔹 PERIPHERALS (внешние БД)
-    # =========================================================
+    # =================================================================
+    # ПЕРИФЕРИЯ (МЫШИ / КЛАВИАТУРЫ — из отдельных БД)
+    # =================================================================
 
     def get_mice(self, search: str = "") -> List[str]:
         try:
             from database.mice_db import MiceDatabase
-            return MiceDatabase().get_all_mice(search)
-        except Exception as e:
-            print(f"❌ Ошибка мышей: {e}")
+            db = MiceDatabase()
+            return db.get_all_mice(search)
+        except Exception:
             return []
 
     def get_keyboards(self, search: str = "") -> List[str]:
         try:
             from database.keyboards_db import KeyboardsDatabase
-            return KeyboardsDatabase().get_all_keyboards(search)
-        except Exception as e:
-            print(f"❌ Ошибка клавиатур: {e}")
+            db = KeyboardsDatabase()
+            return db.get_all_keyboards(search)
+        except Exception:
             return []
 
-    # =========================================================
-    # 🔹 CVE SEARCH
-    # =========================================================
+    # =================================================================
+    # ПОИСК CVE — через JOIN с нормализованными таблицами
+    # =================================================================
 
-    def get_cves_for_component(self, vendor: str, product: str = None) -> List[Dict]:
+    def get_cves_for_component(self, vendor: str,
+                                product: str = None) -> List[Dict]:
+        """Ищет CVE для vendor+product через JOIN."""
         cursor = self._connection.cursor()
+
         query = """
-            SELECT cve_id, cvss_v2, cvss_v3, cvss_v4, cwe_id, cpe_list
-            FROM cve_data
-            WHERE LOWER(vendor) LIKE ?
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+            FROM cve_entries c
+            JOIN cve_cpe_map m ON c.cve_id = m.cve_id
+            JOIN cpe_entries p ON m.cpe_id = p.id
+            WHERE p.vendor LIKE ?
         """
         params = [f"%{vendor.lower()}%"]
         if product:
-            query += " AND LOWER(product) LIKE ?"
+            query += " AND p.product LIKE ?"
             params.append(f"%{product.lower()}%")
-        query += " LIMIT 100"
+        query += " LIMIT 200"
+
         cursor.execute(query, params)
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "cve_id": row["cve_id"],
-                "cvss_v2": row["cvss_v2"],
-                "cvss_v3": row["cvss_v3"],
-                "cvss_v4": row["cvss_v4"],
-                "cwe_id": row["cwe_id"] if row["cwe_id"] else "—",
-                "cpe_list": row["cpe_list"]
-            })
-        return results
+        return [
+            {
+                "cve_id": r["cve_id"],
+                "cvss_v2": r["cvss_v2"],
+                "cvss_v3": r["cvss_v3"],
+                "cvss_v4": r["cvss_v4"],
+                "cwe_id": r["cwe_id"] or "",
+            }
+            for r in cursor.fetchall()
+        ]
 
     def get_cves_by_cpe_mask(self, keyword: str) -> List[Dict]:
+        """Ищет CVE по ключевому слову в vendor или product."""
         cursor = self._connection.cursor()
-        query = """
-            SELECT cve_id, cvss_v2, cvss_v3, cvss_v4, cpe_list
-            FROM cve_data
-            WHERE cpe_list LIKE ?
-            LIMIT 50
-        """
-        cursor.execute(query, [f"%{keyword}%"])
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                "cve_id": row["cve_id"],
-                "cvss_v2": row["cvss_v2"],
-                "cvss_v3": row["cvss_v3"],
-                "cvss_v4": row["cvss_v4"],
-                "cpe_list": row["cpe_list"]
-            })
-        return results
+        kw = f"%{keyword.lower()}%"
+
+        cursor.execute("""
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+            FROM cve_entries c
+            JOIN cve_cpe_map m ON c.cve_id = m.cve_id
+            JOIN cpe_entries p ON m.cpe_id = p.id
+            WHERE p.vendor LIKE ? OR p.product LIKE ?
+            LIMIT 100
+        """, [kw, kw])
+
+        return [
+            {
+                "cve_id": r["cve_id"],
+                "cvss_v2": r["cvss_v2"],
+                "cvss_v3": r["cvss_v3"],
+                "cvss_v4": r["cvss_v4"],
+                "cwe_id": r["cwe_id"] or "",
+            }
+            for r in cursor.fetchall()
+        ]

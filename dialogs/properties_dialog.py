@@ -497,17 +497,23 @@ class PropertiesDialog:
                                                               text_color="green" if var.get() else "gray"))
 
     def create_network_editor(self, parent, config: Dict):
-        """Создаёт редактор сети (промт 8 №10: единый стиль фреймов)."""
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+        """Создаёт редактор сети (промт 9 №6: современный стиль)."""
+        from utils import theme
+
+        surface_bg = theme.color("surface")
+        card_bg = theme.color("card_bg")
+        border_clr = theme.color("card_border")
+        primary = theme.color("primary")
+        text_primary = theme.color("text_primary")
+        text_muted = theme.color("text_muted")
 
         # Основной фрейм с прокруткой
-        main_frame = ctk.CTkFrame(parent, fg_color=section_bg)
+        main_frame = ctk.CTkFrame(parent, fg_color=surface_bg)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(main_frame, bg=self._get_canvas_bg_color(), highlightthickness=0)
         scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ctk.CTkFrame(canvas, fg_color=section_bg)
+        scrollable_frame = ctk.CTkFrame(canvas, fg_color=surface_bg)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -523,16 +529,28 @@ class PropertiesDialog:
 
         canvas.bind_all("<MouseWheel>", on_mousewheel)
 
-        # Порты — одна секция с тонкой рамкой
-        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=section_bg,
-                                    border_width=1, border_color=border_clr, corner_radius=8)
-        ports_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Card с акцентной полоской сверху
+        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=card_bg,
+                                    border_width=1, border_color=border_clr, corner_radius=10)
+        ports_frame.pack(fill=tk.X, padx=14, pady=14)
 
-        ctk.CTkLabel(ports_frame, text="🔌 Сетевые порты", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
-                                                                                           pady=(10, 5))
+        # Акцентная полоска
+        # Синяя полоска убрана по запросу пользователя
+
+        # Заголовок
+        header = ctk.CTkFrame(ports_frame, fg_color="transparent")
+        header.pack(fill=tk.X, padx=16, pady=(12, 4))
+        ctk.CTkLabel(
+            header, text="🔌 Сетевые порты",
+            font=("Arial", 15, "bold"), text_color=text_primary, anchor="w"
+        ).pack(side=tk.LEFT)
+        ctk.CTkLabel(
+            header, text="IP, MAC, VLAN и роли Wi-Fi",
+            font=("Arial", 10), text_color=text_muted, anchor="w"
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
         ports_container = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        ports_container.pack(fill=tk.X, padx=10, pady=(0, 10))
+        ports_container.pack(fill=tk.X, padx=16, pady=(4, 10))
 
         # Отображаем порты
         eth_ports = [p for p in self.current_ports if p["port_type"] == "ethernet"]
@@ -589,7 +607,8 @@ class PropertiesDialog:
         scrollbar.pack(side="right", fill="y")
 
     def _get_canvas_bg_color(self) -> str:
-        return "#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#ffffff"
+        from utils import theme
+        return theme.c("surface")
 
     def create_port_editor_widget(self, parent, port: Dict, show_network: bool = True):
         """Создаёт виджет для редактирования порта."""
@@ -1108,142 +1127,146 @@ class ViewOnlyPropertiesDialog:
         return result
 
     def create_widgets(self):
+        """Создаёт виджеты в стиле промт-стиль2 — тёмная палитра,
+        секции-карточки с заголовками и иконками для каждого компонента.
+        """
+        from utils.theme import color, style_dialog
+
+        dialog_bg = color("dialog_bg")
+        card_bg = color("card_bg")
+        card_border = color("card_border")
+        primary = color("primary")
+        primary_hover = color("primary_hover")
+        text_primary = color("text_primary")
+        text_secondary = color("text_secondary")
+        text_muted = color("text_muted")
+        divider = color("divider")
+        ghost_bg = color("ghost_bg")
+        ghost_hover = color("ghost_hover")
+
+        self.dialog.configure(fg_color=dialog_bg)
+
         # Заголовок
         title_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         title_frame.pack(fill=tk.X, padx=25, pady=(15, 5))
-
-        type_icons = {
-            "Router": "📡",
-            "Switch": "🔌",
-            "Server": "🖥️",
-            "ARM": "💻",
-            "Laptop": "📓",
-            "Internet": "🌐",
-            "VirtualizationServer": "☁️"
-        }
-        icon = type_icons.get(self.node.type, "📦")
 
         header_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
         header_frame.pack(fill=tk.X)
 
         ctk.CTkLabel(
-            header_frame,
-            text=f"{icon} {self.node.name}",
-            font=("Segoe UI", 24, "bold"),
-            text_color="#1E88E5"
+            header_frame, text=f"{self.node.name}",
+            font=("Arial", 22, "bold"), text_color=text_primary
         ).pack(anchor=tk.W)
 
         ctk.CTkLabel(
             header_frame,
             text=f"Тип: {self.get_node_type_russian(self.node.type)}",
-            font=("Segoe UI", 13),
-            text_color="gray"
+            font=("Arial", 12), text_color=text_secondary
         ).pack(anchor=tk.W, pady=(2, 0))
 
-        has_status = self.node.firewall_enabled or self.node.vpn_client_enabled or self.node.vpn_server_enabled
-        if has_status:
-            status_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
-            status_frame.pack(anchor=tk.W, pady=(5, 0))
+        # Разделитель
+        ctk.CTkFrame(self.dialog, height=2, fg_color=primary).pack(fill=tk.X, padx=25, pady=(8, 10))
 
-            if self.node.firewall_enabled:
-                ctk.CTkLabel(
-                    status_frame,
-                    text="🛡️ Файервол включён",
-                    font=("Segoe UI", 11),
-                    text_color="#4CAF50"
-                ).pack(side=tk.LEFT, padx=(0, 10))
-
-            if self.node.vpn_client_enabled or self.node.vpn_server_enabled:
-                vpn_text = "🔒 VPN клиент" if self.node.vpn_client_enabled else "🔒 VPN сервер" if self.node.vpn_server_enabled else ""
-                if vpn_text:
-                    ctk.CTkLabel(
-                        status_frame,
-                        text=vpn_text,
-                        font=("Segoe UI", 11),
-                        text_color="#FF9800"
-                    ).pack(side=tk.LEFT)
-
-        separator = ctk.CTkFrame(self.dialog, height=2, fg_color="#1E88E5")
-        separator.pack(fill=tk.X, padx=25, pady=(5, 10))
-
-        main_scroll_frame = ctk.CTkScrollableFrame(self.dialog, fg_color="transparent")
-        main_scroll_frame.pack(fill=tk.BOTH, expand=True, padx=25, pady=(0, 10))
+        # Scrollable area
+        main_scroll = ctk.CTkScrollableFrame(self.dialog, fg_color="transparent")
+        main_scroll.pack(fill=tk.BOTH, expand=True, padx=25, pady=(0, 10))
 
         components = self._get_all_components()
+
+        # Иконки-заглушки для компонентов (будут заменены на PNG из resources/icons/)
+        comp_icons = {
+            "Процессор": "⚙",
+            "Видеоконтроллер": "🖥",
+            "Материнская плата": "🔧",
+            "HDD/SSD": "💾",
+            "Оперативная память": "🧮",
+            "Сетевая карта": "📡",
+            "ОС": "🔶",
+            "Прикладное ПО": "▶",
+            "Приложение": "▶",
+        }
 
         for category, items in components.items():
             if not items:
                 continue
 
-            if ctk.get_appearance_mode() == "Dark":
-                card_bg = "#2D2D2D"
-            else:
-                card_bg = "#F8F9FA"
+            # Карточка секции
+            card = ctk.CTkFrame(main_scroll, fg_color=card_bg,
+                                 border_width=1, border_color=card_border,
+                                 corner_radius=12)
+            card.pack(fill=tk.X, pady=(0, 12))
 
-            category_card = ctk.CTkFrame(main_scroll_frame, fg_color=card_bg, corner_radius=12)
-            category_card.pack(fill=tk.X, pady=(0, 12))
-
-            header_frame_cat = ctk.CTkFrame(category_card, fg_color="transparent")
-            header_frame_cat.pack(fill=tk.X, padx=20, pady=(15, 10))
-
+            # Заголовок секции
+            cat_header = ctk.CTkFrame(card, fg_color="transparent")
+            cat_header.pack(fill=tk.X, padx=20, pady=(14, 8))
             ctk.CTkLabel(
-                header_frame_cat,
-                text=category,
-                font=("Segoe UI", 16, "bold"),
-                text_color="#1E88E5"
+                cat_header, text=category,
+                font=("Arial", 15, "bold"), text_color=primary
             ).pack(anchor=tk.W)
 
-            ctk.CTkFrame(category_card, height=1, fg_color="#CCCCCC").pack(fill=tk.X, padx=20, pady=(0, 10))
+            ctk.CTkFrame(card, height=1, fg_color=divider).pack(fill=tk.X, padx=20)
 
-            content_frame = ctk.CTkFrame(category_card, fg_color="transparent")
-            content_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
+            content = ctk.CTkFrame(card, fg_color="transparent")
+            content.pack(fill=tk.X, padx=20, pady=(8, 14))
 
-            for idx, item in enumerate(items):
+            for item in items:
                 if category == "🌐 Сетевые порты":
-                    self._create_port_widget(content_frame, item)
+                    self._create_port_widget(content, item)
                 else:
-                    self._create_component_widget(content_frame, item)
+                    # Определяем иконку по типу компонента
+                    item_text = item.get("text", str(item)) if isinstance(item, dict) else str(item)
+                    icon_char = "●"
+                    for prefix, ic in comp_icons.items():
+                        if item_text.startswith(prefix + ":"):
+                            icon_char = ic
+                            break
+                    if isinstance(item, dict) and item.get("category"):
+                        icon_char = {"Мышь": "🖱", "Клавиатура": "⌨",
+                                     "Принтер/МФУ": "🖨", "Монитор": "🖥"}.get(
+                            item["category"], "●")
 
-            ctk.CTkFrame(main_scroll_frame, height=5, fg_color="transparent").pack()
+                    row = ctk.CTkFrame(content, fg_color="transparent")
+                    row.pack(fill=tk.X, pady=3)
 
-        has_any_data = any(components.values())
-        if not has_any_data:
-            empty_frame = ctk.CTkFrame(main_scroll_frame, fg_color="#F8F9FA", corner_radius=12)
-            empty_frame.pack(fill=tk.BOTH, expand=True, pady=50, padx=50)
+                    ctk.CTkLabel(row, text=icon_char, font=("Arial", 14),
+                                  width=24, anchor="w",
+                                  text_color=primary).pack(side=tk.LEFT, padx=(0, 8))
 
-            ctk.CTkLabel(
-                empty_frame,
-                text="📭 Нет данных о конфигурации узла",
-                font=("Segoe UI", 16),
-                text_color="gray"
-            ).pack(expand=True)
+                    if isinstance(item, dict) and item.get("category"):
+                        ctk.CTkLabel(row, text=f"[{item['category']}]:",
+                                      font=("Arial", 11, "bold"),
+                                      text_color=color("warning"),
+                                      anchor="w").pack(side=tk.LEFT, padx=(0, 6))
 
+                    ctk.CTkLabel(row, text=item_text, font=("Arial", 12),
+                                  text_color=text_primary, anchor="w",
+                                  wraplength=600).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        if not any(components.values()):
+            empty = ctk.CTkFrame(main_scroll, fg_color=card_bg, corner_radius=12)
+            empty.pack(fill=tk.BOTH, expand=True, pady=40, padx=40)
+            ctk.CTkLabel(empty, text="Нет данных о конфигурации узла",
+                          font=("Arial", 15), text_color=text_muted).pack(expand=True)
+
+        # Кнопки
         btn_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         btn_frame.pack(fill=tk.X, padx=25, pady=(0, 20))
 
         ctk.CTkButton(
-            btn_frame,
-            text="✏️ Редактировать",
-            command=self.open_edit_dialog,
-            fg_color="#1E88E5",
-            hover_color="#1565C0",
-            width=140,
-            height=42,
-            font=("Segoe UI", 14, "bold"),
-            corner_radius=8
-        ).pack(side=tk.RIGHT, padx=5)
+            btn_frame, text="⚙  Редактировать", command=self.open_edit_dialog,
+            fg_color=primary, hover_color=primary_hover,
+            text_color="#FFFFFF", width=160, height=42,
+            corner_radius=10, font=("Arial", 13, "bold")
+        ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
-            btn_frame,
-            text="✕ Закрыть",
-            command=self.dialog.destroy,
-            fg_color="#757575",
-            hover_color="#616161",
-            width=110,
-            height=42,
-            font=("Segoe UI", 13),
-            corner_radius=8
-        ).pack(side=tk.RIGHT, padx=5)
+            btn_frame, text="✕  Закрыть", command=self.dialog.destroy,
+            fg_color=ghost_bg, hover_color=ghost_hover,
+            text_color=text_primary, width=110, height=42,
+            corner_radius=10, font=("Arial", 13)
+        ).pack(side=tk.RIGHT)
+
+        style_dialog(self.dialog, width=850, height=750)
 
     def _create_component_widget(self, parent, item):
         """Создаёт виджет для обычного компонента."""

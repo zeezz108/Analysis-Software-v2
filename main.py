@@ -52,19 +52,86 @@ def show_splash_and_load(on_complete):
     )
     status_label.pack(pady=(0, 10))
 
-    # Прогресс-бар
-    progress = ctk.CTkProgressBar(splash, width=800, height=20, corner_radius=10)
-    progress.pack(pady=(0, 20))
-    progress.set(0)
+    # Прогресс-бар — Canvas-based, чтобы можно было добавить «живой» блик,
+    # бегущий по заполненной части (промт 9 №5). CTkProgressBar такую
+    # анимацию поверх реального значения не поддерживает.
+    progress_w = 800
+    progress_h = 20
+    shine_w = 140
+    splash_bg = "#1a1a2e"
+    track_color = "#2a2a44"
+    fill_color = "#42A5F5"
+    shine_color = "#BBDEFB"
+
+    progress_canvas = tk.Canvas(
+        splash, width=progress_w, height=progress_h,
+        highlightthickness=0, bg=splash_bg, bd=0
+    )
+    progress_canvas.pack(pady=(0, 20))
+
+    progress_state = {"value": 0.0, "shine_x": -shine_w}
+
+    # Статичные элементы (фон-«дорожка», заполнение, блик)
+    progress_canvas.create_rectangle(
+        0, 0, progress_w, progress_h, fill=track_color, outline="", tags=("track",)
+    )
+    progress_canvas.create_rectangle(
+        0, 0, 0, progress_h, fill=fill_color, outline="", tags=("fill",)
+    )
+    progress_canvas.create_rectangle(
+        -shine_w, 0, 0, progress_h, fill=shine_color, outline="", tags=("shine",)
+    )
 
     def update_status(value):
         """Обновляет прогресс: показывает только проценты, без текста."""
         try:
-            pct = max(0, min(100, int(round(value * 100))))
+            pct_value = max(0.0, min(1.0, float(value)))
+            progress_state["value"] = pct_value
+            pct = int(round(pct_value * 100))
             status_label.configure(text=f"{pct}%")
-            progress.set(value)
+            fill_px = int(progress_w * pct_value)
+            progress_canvas.coords("fill", 0, 0, fill_px, progress_h)
         except Exception:
             pass
+
+    def animate_shine():
+        """«Живой» блик, бегущий по заполненной части прогресс-бара.
+
+        Двигается слева направо, обрезается под текущую ширину заполнения.
+        Когда уходит за правый край — появляется снова слева. Пока
+        значение прогресса 0, блик полностью скрыт.
+        """
+        try:
+            if not splash.winfo_exists():
+                return
+        except Exception:
+            return
+        fill_px = int(progress_w * progress_state["value"])
+        if fill_px <= 0:
+            progress_canvas.coords("shine", -shine_w, 0, -shine_w, progress_h)
+        else:
+            progress_state["shine_x"] += 4
+            if progress_state["shine_x"] > fill_px:
+                progress_state["shine_x"] = -shine_w
+            left = max(0, progress_state["shine_x"])
+            right = min(fill_px, progress_state["shine_x"] + shine_w)
+            if right > left:
+                progress_canvas.coords("shine", left, 0, right, progress_h)
+            else:
+                progress_canvas.coords("shine", -shine_w, 0, -shine_w, progress_h)
+        try:
+            splash.after(20, animate_shine)
+        except Exception:
+            pass
+
+    # Запускаем анимацию блика
+    splash.after(20, animate_shine)
+
+    # Python 3.13: splash.after() из фонового потока вызывает
+    # RuntimeError: main thread is not in main loop.
+    # Решение: фоновый поток пишет в queue, главный поток читает через poll.
+    import queue as _queue
+    _q = _queue.Queue()
 
     def load_databases():
         try:
@@ -74,16 +141,14 @@ def show_splash_and_load(on_complete):
             cache = DataCache()
 
             if cache.is_loaded():
-                splash.after(0, lambda: update_status(1.0))
-                splash.after(300, lambda: on_complete(splash))
+                _q.put(("progress", 1.0))
+                _q.put(("done",))
                 return
 
-            # Подключаемся к базам данных
-            splash.after(0, lambda: update_status(0.05))
+            _q.put(("progress", 0.05))
             from database.cve_db import CVEDatabase
             db = CVEDatabase()
 
-            # Собираем все уникальные методы из конфига
             all_tasks = []
             for node_type, config in NODE_CONFIG.items():
                 for tab_group in ("hardware_tabs", "software_tabs", "hypervisor_tabs", "peripheral_tabs"):
@@ -96,12 +161,10 @@ def show_splash_and_load(on_complete):
 
             total = len(all_tasks)
             for i, (cache_key, method) in enumerate(all_tasks):
-                splash.after(0, lambda v=(i + 1) / max(total, 1) * 0.85:
-                             update_status(v + 0.1))
+                _q.put(("progress", (i + 1) / max(total, 1) * 0.85 + 0.1))
                 cache.get(cache_key, method)
 
-            # Загружаем базы мышей и клавиатур
-            splash.after(0, lambda: update_status(0.92))
+            _q.put(("progress", 0.92))
             try:
                 from database.keyboards_db import KeyboardsDatabase
                 KeyboardsDatabase()
@@ -114,15 +177,34 @@ def show_splash_and_load(on_complete):
                 pass
 
             cache.set_loaded()
-            splash.after(0, lambda: update_status(1.0))
-            splash.after(400, lambda: on_complete(splash))
+            _q.put(("progress", 1.0))
+            _q.put(("done",))
 
-        except Exception as e:
-            splash.after(0, lambda: update_status(1.0))
-            splash.after(2000, lambda: on_complete(splash))
+        except Exception:
+            _q.put(("progress", 1.0))
+            _q.put(("done",))
+
+    def _poll_queue():
+        """Читает сообщения из очереди в главном потоке — thread-safe."""
+        try:
+            while True:
+                msg = _q.get_nowait()
+                if msg[0] == "done":
+                    splash.after(400, lambda: on_complete(splash))
+                    return
+                elif msg[0] == "progress":
+                    update_status(msg[1])
+        except _queue.Empty:
+            pass
+        try:
+            if splash.winfo_exists():
+                splash.after(50, _poll_queue)
+        except Exception:
+            pass
 
     thread = threading.Thread(target=load_databases, daemon=True)
     thread.start()
+    splash.after(50, _poll_queue)
 
     return splash
 
@@ -131,9 +213,10 @@ def main():
     """
     Главная функция запуска приложения
     """
-    # Настройка темы CustomTkinter
-    ctk.set_appearance_mode("light")
+    # Настройка темы CustomTkinter (загружаем сохранённую — промт 9 №7)
+    from utils.theme import apply_theme, load_theme
     ctk.set_default_color_theme("dark-blue")
+    apply_theme(load_theme())
 
     # Применяем пользовательский масштаб (если ранее сохранён)
     from utils.scaling import apply_scaling

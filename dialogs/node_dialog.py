@@ -6,6 +6,7 @@
 - NodeCreationDialog: Основной диалог создания/редактирования узла
 """
 
+import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 import customtkinter as ctk
@@ -28,103 +29,152 @@ from config.node_config import NODE_CONFIG, get_node_type_english
 # ============================================================================
 
 class NodeTypeSelectionDialog:
-    """Диалог выбора типа узла перед созданием."""
+    """Диалог выбора типа узла — карточки-плитки с иконками (промт-стиль2)."""
+
+    # Описания типов узлов для карточек (порядок = порядок отображения)
+    _NODE_TYPES = [
+        {"value": "АРМ",      "title": "АРМ",        "subtitle": "автоматизированное\nрабочее место", "icon_key": "ARM"},
+        {"value": "Ноутбук",  "title": "Ноутбук",    "subtitle": "портативное\nустройство",          "icon_key": "Laptop"},
+        {"value": "Маршрутизатор", "title": "Маршрутизатор", "subtitle": "Маршрутизатор",             "icon_key": "Router"},
+        {"value": "Коммутатор", "title": "Коммутатор", "subtitle": "Коммутатор",                      "icon_key": "Switch"},
+        {"value": "Сервер",   "title": "Сервер",      "subtitle": "Сервер",                           "icon_key": "Server"},
+        {"value": "Сервер виртуализации", "title": "Сервер\nвиртуализации", "subtitle": "VM-хост",    "icon_key": "VirtualizationServer"},
+        {"value": "Интернет", "title": "Интернет",    "subtitle": "Интернет",                         "icon_key": "Internet"},
+    ]
 
     def __init__(self, parent, board=None):
+        from utils.theme import style_dialog
         self.parent = parent
-        self.board = board  # может быть None
+        self.board = board
         self.result = None
+        self._card_frames = []
+        self._icon_refs = []  # prevent garbage collection
 
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title("Выбор типа узла")
-        self.dialog.geometry("450x500")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
         self.dialog.grab_set()
 
+        self.node_type_var = tk.StringVar(value="АРМ")
         self.create_widgets()
-        self.center_window()
-
-    def center_window(self):
-        self.dialog.update_idletasks()
-        # Get the geometry size that was set
-        geo = self.dialog.geometry()
-        # Parse "WxH+X+Y" or "WxH"
-        size_part = geo.split('+')[0]
-        if 'x' in size_part:
-            width = int(size_part.split('x')[0])
-            height = int(size_part.split('x')[1])
-        else:
-            width = self.dialog.winfo_reqwidth()
-            height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        style_dialog(self.dialog, width=580, height=520)
 
     def create_widgets(self):
-        temp_frame = ctk.CTkFrame(self.dialog)
-        frame_color = temp_frame.cget("fg_color")
-        temp_frame.destroy()
-        self.dialog.configure(fg_color=frame_color)
+        from utils.theme import color
+        from config.node_config import ICON_FILES, RESOURCES_DIR
 
-        # Заголовок
-        ctk.CTkLabel(
-            self.dialog,
-            text="Выберите тип создаваемого узла",
-            font=("Arial", 18, "bold")
-        ).pack(pady=(25, 20))
+        dialog_bg = color("dialog_bg")
+        card_bg = color("card_bg")
+        card_border = color("card_border")
+        card_sel_brd = color("card_sel_brd")
+        card_selected = color("card_selected")
+        text_primary = color("text_primary")
+        text_muted = color("text_muted")
+        primary = color("primary")
+        primary_hover = color("primary_hover")
+        danger = color("danger")
+        danger_hover = color("danger_hover")
 
-        # Переменная для хранения выбранного типа
-        self.node_type_var = tk.StringVar(value="АРМ")
+        self.dialog.configure(fg_color=dialog_bg)
 
-        # Список типов узлов
-        node_types = [
-            ("АРМ (автоматизированное рабочее место)", "АРМ"),
-            ("Ноутбук", "Ноутбук"),
-            ("Маршрутизатор", "Маршрутизатор"),
-            ("Коммутатор", "Коммутатор"),
-            ("Сервер", "Сервер"),
-            ("Сервер виртуализации", "Сервер виртуализации"),
-            ("Интернет", "Интернет")
-        ]
+        main = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        main.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
 
-        for display_text, value in node_types:
-            rb = ctk.CTkRadioButton(
-                self.dialog,
-                text=display_text,
-                variable=self.node_type_var,
-                value=value,
-                font=("Arial", 13),
-                height=35
+        ctk.CTkLabel(main, text="Выберите тип создаваемого узла",
+                      font=("Arial", 18, "bold"), text_color=text_primary).pack(pady=(0, 20))
+
+        # --- Сетка карточек 4 + 3 ---
+        grid = ctk.CTkFrame(main, fg_color="transparent")
+        grid.pack(fill=tk.BOTH, expand=True)
+
+        # 4 колонки
+        for i in range(4):
+            grid.grid_columnconfigure(i, weight=1, uniform="node_card")
+
+        self._card_frames = []
+        for idx, nt in enumerate(self._NODE_TYPES):
+            row = 0 if idx < 4 else 1
+            col = idx if idx < 4 else idx - 4
+
+            card = ctk.CTkFrame(
+                grid, fg_color=card_bg,
+                border_width=2, border_color=card_border,
+                corner_radius=10, cursor="hand2"
             )
-            rb.pack(anchor=tk.W, pady=5, padx=30)
+            card.grid(row=row, column=col, padx=6, pady=6, sticky="nsew")
 
-        # Фрейм для кнопок
-        button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
-        button_frame.pack(fill=tk.X, pady=(25, 20), padx=20)
+            inner = ctk.CTkFrame(card, fg_color="transparent")
+            inner.pack(expand=True, padx=8, pady=10)
+
+            # Иконка из resources/ (переиспользуем существующие)
+            icon_filename = ICON_FILES.get(nt["icon_key"])
+            icon_loaded = False
+            if icon_filename:
+                icon_path = os.path.join(RESOURCES_DIR, icon_filename)
+                if os.path.exists(icon_path):
+                    try:
+                        from PIL import Image
+                        img = Image.open(icon_path).resize((48, 48), Image.Resampling.LANCZOS)
+                        ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(48, 48))
+                        self._icon_refs.append(ctk_img)
+                        ctk.CTkLabel(inner, image=ctk_img, text="").pack(pady=(0, 6))
+                        icon_loaded = True
+                    except Exception:
+                        pass
+
+            if not icon_loaded:
+                ctk.CTkLabel(inner, text="[icon]", font=("Arial", 10),
+                              text_color=text_muted).pack(pady=(0, 6))
+
+            ctk.CTkLabel(inner, text=nt["title"], font=("Arial", 11, "bold"),
+                          text_color=text_primary, justify="center").pack()
+            ctk.CTkLabel(inner, text=nt["subtitle"], font=("Arial", 9),
+                          text_color=text_muted, justify="center").pack(pady=(2, 0))
+
+            value = nt["value"]
+            for w in [card, inner] + inner.winfo_children():
+                w.bind("<Button-1>", lambda e, v=value: self._select(v))
+
+            self._card_frames.append((card, value))
+
+        self._update_selection()
+
+        # --- Кнопки ---
+        btn_frame = ctk.CTkFrame(main, fg_color="transparent")
+        btn_frame.pack(fill=tk.X, pady=(16, 0))
 
         ctk.CTkButton(
-            button_frame,
-            text="Далее →",
-            command=self.select_type,
-            fg_color="#1E88E5",
-            width=120,
-            height=38,
-            font=("Arial", 13, "bold")
-        ).pack(side=tk.RIGHT, padx=5)
+            btn_frame, text="Далее →", command=self.select_type,
+            fg_color=primary, hover_color=primary_hover,
+            text_color="#FFFFFF", width=140, height=40,
+            corner_radius=10, font=("Arial", 13, "bold")
+        ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
-            button_frame,
-            text="Отмена",
-            command=self.dialog.destroy,
-            fg_color="#CD3333",
-            width=100,
-            height=38,
-            font=("Arial", 13)
-        ).pack(side=tk.RIGHT, padx=5)
+            btn_frame, text="Отмена", command=self.dialog.destroy,
+            fg_color=danger, hover_color=danger_hover,
+            text_color="#FFFFFF", width=110, height=40,
+            corner_radius=10, font=("Arial", 13)
+        ).pack(side=tk.RIGHT)
 
         self.dialog.bind("<Return>", lambda e: self.select_type())
         self.dialog.bind("<Escape>", lambda e: self.dialog.destroy())
+
+    def _select(self, value: str):
+        self.node_type_var.set(value)
+        self._update_selection()
+
+    def _update_selection(self):
+        from utils.theme import color
+        selected = self.node_type_var.get()
+        for card, val in self._card_frames:
+            if val == selected:
+                card.configure(border_color=color("card_sel_brd"),
+                               fg_color=color("card_selected"))
+            else:
+                card.configure(border_color=color("card_border"),
+                               fg_color=color("card_bg"))
 
     def select_type(self):
         self.result = self.node_type_var.get()
@@ -289,13 +339,12 @@ class NodeCreationDialog:
         return value_map.get(var_name, "")
 
     def show_loading_screen(self):
-        """Показывает экран загрузки."""
-        temp_frame = ctk.CTkFrame(self.dialog)
-        frame_color = temp_frame.cget("fg_color")
-        temp_frame.destroy()
-        self.dialog.configure(fg_color=frame_color)
+        """Показывает экран загрузки (тёмная палитра)."""
+        from utils.theme import color
 
-        self.loading_frame = ctk.CTkFrame(self.dialog, fg_color=frame_color)
+        self.dialog.configure(fg_color=color("dialog_bg"))
+
+        self.loading_frame = ctk.CTkFrame(self.dialog, fg_color=color("dialog_bg"))
         self.loading_frame.pack(fill=tk.BOTH, expand=True)
 
         content_frame = ctk.CTkFrame(self.loading_frame, fg_color="transparent")
@@ -303,17 +352,18 @@ class NodeCreationDialog:
 
         ctk.CTkLabel(
             content_frame, text="Загрузка конфигураций...",
-            font=("Arial", 22, "bold")
+            font=("Arial", 22, "bold"), text_color=color("text_primary")
         ).pack(pady=(0, 30))
 
         self.animation_label = ctk.CTkLabel(
-            content_frame, text="⏳", font=("Arial", 72, "bold"), text_color="#2196F3"
+            content_frame, text="⏳", font=("Arial", 72, "bold"),
+            text_color=color("primary")
         )
         self.animation_label.pack(pady=20)
 
         self.status_label_loading = ctk.CTkLabel(
             content_frame, text="Подготовка данных для выбранного типа узла...",
-            font=("Arial", 14), text_color="gray"
+            font=("Arial", 14), text_color=color("text_muted")
         )
         self.status_label_loading.pack(pady=(0, 20))
 
@@ -324,7 +374,7 @@ class NodeCreationDialog:
         if self.preselected_type:
             ctk.CTkLabel(
                 content_frame, text=f"Тип узла: {self.preselected_type}",
-                font=("Arial", 16, "bold")
+                font=("Arial", 16, "bold"), text_color=color("text_primary")
             ).pack(pady=(30, 0))
 
         self.loading_active = True
@@ -477,40 +527,63 @@ class NodeCreationDialog:
     # ========================================================================
 
     def create_widgets(self):
-        """Создаёт основной интерфейс диалога."""
-        temp_frame = ctk.CTkFrame(self.dialog)
-        frame_color = temp_frame.cget("fg_color")
-        temp_frame.destroy()
-        self.dialog.configure(fg_color=frame_color)
+        """Создаёт основной интерфейс диалога (промт-стиль2 — тёмная палитра)."""
+        from utils.theme import color, style_dialog
+
+        self.dialog.configure(fg_color=color("dialog_bg"))
 
         # Заголовок
         title_text = "Создание нового узла" if not self.is_edit_mode else f"Редактирование узла: {self.existing_node.name}"
         ctk.CTkLabel(
             self.dialog, text=title_text,
-            font=("Arial", 18, "bold")
+            font=("Arial", 18, "bold"), text_color=color("text_primary")
         ).pack(pady=(15, 10))
 
-        # Имя узла
-        name_frame = ctk.CTkFrame(self.dialog)
-        name_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
+        # --- Основные сведения (card с обводкой primary) ---
+        info_card = ctk.CTkFrame(self.dialog, fg_color=color("card_bg"),
+                                   border_width=2, border_color=color("primary"),
+                                   corner_radius=10)
+        info_card.pack(fill=tk.X, padx=15, pady=(0, 10))
+        info_inner = ctk.CTkFrame(info_card, fg_color="transparent")
+        info_inner.pack(fill=tk.X, padx=16, pady=12)
 
-        ctk.CTkLabel(name_frame, text="Имя узла", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 0))
+        # Имя узла + выбор зоны в одной строке
+        row = ctk.CTkFrame(info_inner, fg_color="transparent")
+        row.pack(fill=tk.X)
+        row.grid_columnconfigure(0, weight=1, uniform="info")
+        row.grid_columnconfigure(1, weight=1, uniform="info")
+
+        # Имя
+        name_col = ctk.CTkFrame(row, fg_color="transparent")
+        name_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        ctk.CTkLabel(name_col, text="Имя узла", font=("Arial", 12, "bold"),
+                      text_color=color("text_primary"), anchor="w").pack(fill=tk.X)
 
         if not hasattr(self, 'node_name_var') or not self.node_name_var:
             self.node_name_var = tk.StringVar()
             if self.is_edit_mode and self.existing_node:
                 self.node_name_var.set(self.existing_node.name)
 
-        ctk.CTkEntry(name_frame, textvariable=self.node_name_var, height=35).pack(fill=tk.X, padx=10, pady=(5, 10))
+        ctk.CTkEntry(name_col, textvariable=self.node_name_var, height=36,
+                      corner_radius=8, fg_color=color("input_bg"),
+                      border_color=color("input_border"), border_width=1).pack(fill=tk.X, pady=(4, 0))
 
-        # Выбор зоны
-        self.zone_frame = ctk.CTkFrame(self.dialog)
-        self.zone_frame.pack(fill=tk.X, padx=15, pady=(0, 10))
+        # Зона
+        zone_col = ctk.CTkFrame(row, fg_color="transparent")
+        zone_col.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
+        self.zone_frame = zone_col
         self.update_zone_frame()
 
-        # Вкладки
-        self.notebook = ctk.CTkTabview(self.dialog)
+        # Вкладки — фон под общую палитру
+        self.notebook = ctk.CTkTabview(self.dialog, fg_color=color("dialog_bg"),
+                                        segmented_button_fg_color=color("card_bg"),
+                                        segmented_button_selected_color=color("primary"),
+                                        segmented_button_unselected_color=color("card_bg"))
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+        try:
+            self.notebook._segmented_button.configure(text_color=("#111827", "#E2E8F0"))
+        except Exception:
+            pass
 
         self.update_tabs()
 
@@ -519,27 +592,34 @@ class NodeCreationDialog:
         button_frame.pack(fill=tk.X, padx=15, pady=(10, 15))
 
         ctk.CTkButton(
-            button_frame, text="Сохранить" if self.is_edit_mode else "Создать",
+            button_frame,
+            text="Сохранить" if self.is_edit_mode else "Создать",
             command=self.create_node, font=("Arial", 13, "bold"),
-            fg_color="#4CAF50", width=120, height=38
-        ).pack(side=tk.RIGHT, padx=5)
+            fg_color=color("success"), hover_color=color("success_hover"),
+            text_color="#FFFFFF", width=130, height=40, corner_radius=10
+        ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
             button_frame, text="Отмена", command=self.dialog.destroy,
-            fg_color="#CD3333", font=("Arial", 13), width=100, height=38
-        ).pack(side=tk.RIGHT, padx=5)
+            fg_color=color("danger"), hover_color=color("danger_hover"),
+            text_color="#FFFFFF", font=("Arial", 13),
+            width=110, height=40, corner_radius=10
+        ).pack(side=tk.RIGHT)
 
         self.center_window()
 
     def update_zone_frame(self):
-        """Обновляет фрейм выбора зоны."""
+        """Обновляет фрейм выбора зоны (промт-стиль2: dropdown вместо радиокнопок)."""
+        from utils.theme import color
+
         for widget in self.zone_frame.winfo_children():
             widget.destroy()
 
         ctk.CTkLabel(
-            self.zone_frame, text="Выбор зоны для размещения:",
-            font=("Arial", 14, "bold")
-        ).pack(anchor=tk.W, padx=10, pady=(10, 10))
+            self.zone_frame, text="Выбор зоны TIM для размещения",
+            font=("Arial", 12, "bold"), text_color=color("text_primary"),
+            anchor="w"
+        ).pack(fill=tk.X)
 
         current_type = self.preselected_type if self.preselected_type else "АРМ"
         target_zone_type = "free"
@@ -552,29 +632,52 @@ class NodeCreationDialog:
         if target_zone_type == "free":
             ctk.CTkLabel(
                 self.zone_frame,
-                text="🌐 Интернет-узел будет размещен в свободной зоне (вне зон TIM)",
-                font=("Arial", 12)
-            ).pack(anchor=tk.W, padx=10, pady=2)
+                text="Интернет-узел — свободная зона (вне TIM)",
+                font=("Arial", 11), text_color=color("text_muted"), anchor="w"
+            ).pack(fill=tk.X, pady=(4, 0))
         else:
             tim_zones = self.board.get_tim_zones()
             if tim_zones:
                 default_zone_id = self.existing_zone_id if self.is_edit_mode else tim_zones[0].id
                 self.zone_var = tk.StringVar(value=default_zone_id)
 
+                # Маппинг display_text → zone_id
+                self._zone_map = {}
+                values = []
+                default_display = ""
                 for zone in tim_zones:
                     display_text = zone.get_display_text()
                     if zone.name:
                         display_text += f" - {zone.name}"
+                    self._zone_map[display_text] = zone.id
+                    values.append(display_text)
+                    if zone.id == default_zone_id:
+                        default_display = display_text
 
-                    ctk.CTkRadioButton(
-                        self.zone_frame, text=display_text,
-                        variable=self.zone_var, value=zone.id, font=("Arial", 13)
-                    ).pack(anchor=tk.W, padx=20, pady=3)
+                self._zone_display_var = tk.StringVar(value=default_display)
+
+                combo = ctk.CTkComboBox(
+                    self.zone_frame, values=values,
+                    variable=self._zone_display_var,
+                    height=36, corner_radius=8,
+                    fg_color=color("input_bg"),
+                    border_color=color("input_border"),
+                    button_color=color("primary"),
+                    command=self._on_zone_combo_changed,
+                    state="readonly"
+                )
+                combo.pack(fill=tk.X, pady=(4, 0))
             else:
                 ctk.CTkLabel(
-                    self.zone_frame, text="❌ Сначала создайте зону TIM!",
-                    font=("Arial", 12), text_color="red"
-                ).pack(anchor=tk.W, padx=10, pady=5)
+                    self.zone_frame, text="Сначала создайте зону TIM!",
+                    font=("Arial", 11), text_color=color("danger"), anchor="w"
+                ).pack(fill=tk.X, pady=(4, 0))
+
+    def _on_zone_combo_changed(self, choice: str):
+        """Обновляет zone_var при выборе зоны из комбобокса."""
+        zone_id = getattr(self, '_zone_map', {}).get(choice)
+        if zone_id and hasattr(self, 'zone_var'):
+            self.zone_var.set(zone_id)
 
     def update_tabs(self):
         """Обновляет вкладки в зависимости от типа узла."""
@@ -685,11 +788,25 @@ class NodeCreationDialog:
     # ВКЛАДКИ КОМПОНЕНТОВ
     # ========================================================================
 
+    def _styled_subtabview(self, parent):
+        """Создаёт подвкладки с фоном под палитру."""
+        from utils.theme import color as _tc
+        tv = ctk.CTkTabview(parent, fg_color=_tc("dialog_bg"),
+                             segmented_button_fg_color=_tc("card_bg"),
+                             segmented_button_selected_color=_tc("primary"),
+                             segmented_button_unselected_color=_tc("card_bg"))
+        tv.pack(fill=tk.BOTH, expand=True)
+        # Текст вкладок — чёрный на светлой теме, белый на тёмной
+        try:
+            tv._segmented_button.configure(text_color=("#111827", "#E2E8F0"))
+        except Exception:
+            pass
+        return tv
+
     def create_hardware_tabs(self, parent, hardware_configs):
         """Создаёт вкладки аппаратного обеспечения."""
         if len(hardware_configs) > 1:
-            tabview = ctk.CTkTabview(parent)
-            tabview.pack(fill=tk.BOTH, expand=True)
+            tabview = self._styled_subtabview(parent)
             for config in hardware_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
@@ -709,8 +826,7 @@ class NodeCreationDialog:
     def create_software_tabs(self, parent, software_configs):
         """Создаёт вкладки программного обеспечения."""
         if len(software_configs) > 1:
-            tabview = ctk.CTkTabview(parent)
-            tabview.pack(fill=tk.BOTH, expand=True)
+            tabview = self._styled_subtabview(parent)
             for config in software_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
@@ -730,8 +846,7 @@ class NodeCreationDialog:
     def create_peripheral_tabs(self, parent, peripheral_configs):
         """Создаёт вкладки периферийных устройств."""
         if len(peripheral_configs) > 1:
-            tabview = ctk.CTkTabview(parent)
-            tabview.pack(fill=tk.BOTH, expand=True)
+            tabview = self._styled_subtabview(parent)
             for config in peripheral_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
@@ -744,10 +859,14 @@ class NodeCreationDialog:
 
     def create_paginated_combo(self, parent, title, items, var_name, current_value=None):
         """Создаёт комбобокс с поиском и пагинацией."""
-        frame = ctk.CTkFrame(parent)
+        from utils.theme import color as _tc
+        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
+                              border_width=2, border_color=_tc("primary"),
+                              corner_radius=10)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         if current_value is None and self.is_edit_mode:
             current_value = self.get_current_selection_for_tab({"var_name": var_name})
@@ -759,19 +878,24 @@ class NodeCreationDialog:
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
         search_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ctk.CTkLabel(search_frame, text="🔍 Поиск:", font=("Arial", 12)).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(search_frame, text="🔍 Поиск:", font=("Arial", 12),
+                      text_color=_tc("text_secondary")).pack(side=tk.LEFT, padx=(0, 5))
         search_var = tk.StringVar()
-        ctk.CTkEntry(search_frame, textvariable=search_var, placeholder_text="Введите текст для поиска...").pack(
-            side=tk.LEFT, fill=tk.X, expand=True)
+        ctk.CTkEntry(search_frame, textvariable=search_var,
+                      placeholder_text="Введите текст для поиска...",
+                      fg_color=_tc("input_bg"), border_color=_tc("input_border"),
+                      border_width=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
         count_label = ctk.CTkLabel(search_frame, text=f"({len(items)} шт.)", font=("Arial", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
         # Список
-        list_frame = ctk.CTkFrame(frame)
+        list_frame = ctk.CTkFrame(frame, fg_color="transparent")
         list_frame.pack(fill=tk.BOTH, expand=True)
 
-        text_list = ctk.CTkTextbox(list_frame, wrap="none")
+        text_list = ctk.CTkTextbox(list_frame, wrap="none",
+                                    fg_color=_tc("input_bg"),
+                                    text_color=_tc("text_primary"))
         text_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         text_list.configure(cursor="hand2")
 
@@ -867,10 +991,14 @@ class NodeCreationDialog:
 
     def create_multi_select_combo(self, parent, title, items, var_name):
         """Создаёт двухпанельный виджет множественного выбора (как в ВМ)."""
-        frame = ctk.CTkFrame(parent)
+        from utils.theme import color as _tc
+        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
+                              border_width=2, border_color=_tc("primary"),
+                              corner_radius=10)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         # Загружаем текущие выбранные значения
         current_values = []
@@ -891,10 +1019,11 @@ class NodeCreationDialog:
         lb_fg = "white" if is_dark else "black"
 
         # === Левая колонка: доступные ===
-        left_frame = ctk.CTkFrame(columns_frame)
+        left_frame = ctk.CTkFrame(columns_frame, fg_color="transparent")
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        ctk.CTkLabel(left_frame, text="Доступные:", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(0, 5))
+        ctk.CTkLabel(left_frame, text="Доступные:", font=("Arial", 12, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 5))
 
         search_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         search_frame.pack(fill=tk.X, pady=(0, 5))
@@ -906,7 +1035,7 @@ class NodeCreationDialog:
         count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Arial", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
-        left_list_frame = ctk.CTkFrame(left_frame)
+        left_list_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
         left_list_frame.pack(fill=tk.BOTH, expand=True)
 
         available_listbox = tk.Listbox(
@@ -923,12 +1052,13 @@ class NodeCreationDialog:
             available_listbox.insert(tk.END, item)
 
         # === Правая колонка: выбранные ===
-        right_frame = ctk.CTkFrame(columns_frame)
+        right_frame = ctk.CTkFrame(columns_frame, fg_color="transparent")
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        ctk.CTkLabel(right_frame, text="Выбранные:", font=("Arial", 12, "bold")).pack(anchor=tk.W, pady=(0, 5))
+        ctk.CTkLabel(right_frame, text="Выбранные:", font=("Arial", 12, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 5))
 
-        right_list_frame = ctk.CTkFrame(right_frame)
+        right_list_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
         right_list_frame.pack(fill=tk.BOTH, expand=True, pady=(35, 0))
 
         selected_listbox = tk.Listbox(
@@ -1014,21 +1144,29 @@ class NodeCreationDialog:
     def create_network_tab(self, parent, config):
         """Создаёт вкладку с настройками сети.
 
-        Промт 8 №10: унифицирован фон вкладки под единый стиль
-        (как в окне VPN): одна секция с тонкой рамкой, внутри
-        прозрачные сабфреймы.
+        Промт 9 №6: современный стиль — акцентная полоска сверху секции,
+        theme-aware цвета, цветные hover-кнопки. Основано на палитре
+        `utils.theme`.
         """
-        # Единый стиль секций
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+        from utils import theme
+
+        surface_bg = theme.color("dialog_bg")
+        card_bg = theme.color("card_bg")
+        border_clr = theme.color("card_border")
+        primary = theme.color("primary")
+        primary_hover = theme.color("primary_hover")
+        accent = theme.color("accent")
+        accent_hover = theme.color("accent_hover")
+        text_primary = theme.color("text_primary")
+        text_muted = theme.color("text_muted")
 
         # Основной фрейм с прокруткой
-        main_frame = ctk.CTkFrame(parent, fg_color=section_bg)
+        main_frame = ctk.CTkFrame(parent, fg_color=surface_bg)
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         canvas = tk.Canvas(main_frame, bg=self._get_canvas_bg_color(), highlightthickness=0)
         scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ctk.CTkFrame(canvas, fg_color=section_bg)
+        scrollable_frame = ctk.CTkFrame(canvas, fg_color=surface_bg)
 
         scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
@@ -1044,39 +1182,63 @@ class NodeCreationDialog:
 
         canvas.bind_all("<MouseWheel>", on_mousewheel)
 
-        # Секция с сетевыми портами — единая рамка
-        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=section_bg,
-                                    border_width=1, border_color=border_clr, corner_radius=8)
-        ports_frame.pack(fill=tk.X, padx=10, pady=10)
+        # Секция с сетевыми портами — card с выделяющейся обводкой, без синей полосы
+        ports_frame = ctk.CTkFrame(scrollable_frame, fg_color=card_bg,
+                                    border_width=2, border_color=primary, corner_radius=10)
+        ports_frame.pack(fill=tk.X, padx=14, pady=14)
 
-        ctk.CTkLabel(ports_frame, text="🔌 Сетевые порты", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
-                                                                                           pady=(10, 5))
+        # Заголовок секции
+        header = ctk.CTkFrame(ports_frame, fg_color="transparent")
+        header.pack(fill=tk.X, padx=16, pady=(12, 4))
+        ctk.CTkLabel(
+            header, text="🔌 Сетевые порты",
+            font=("Arial", 15, "bold"), text_color=text_primary, anchor="w"
+        ).pack(side=tk.LEFT)
+        ctk.CTkLabel(
+            header,
+            text="IP, MAC, VLAN и роли Wi-Fi",
+            font=("Arial", 10), text_color=text_muted, anchor="w"
+        ).pack(side=tk.LEFT, padx=(12, 0))
 
         # Сабконтейнеры прозрачные — чтобы не было разнотонности
         self.ports_container = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        self.ports_container.pack(fill=tk.X, padx=10, pady=(0, 10))
+        self.ports_container.pack(fill=tk.X, padx=16, pady=(4, 10))
+
+        # Разделитель перед «Добавить»
+        ctk.CTkFrame(ports_frame, fg_color=border_clr, height=1).pack(fill=tk.X, padx=16, pady=4)
 
         # Кнопка добавления порта
         add_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        add_frame.pack(fill=tk.X, padx=10, pady=(5, 10))
+        add_frame.pack(fill=tk.X, padx=16, pady=(8, 10))
 
-        ctk.CTkLabel(add_frame, text="Добавить порт:", font=("Arial", 12)).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(add_frame, text="Добавить порт:",
+                      font=("Arial", 12, "bold"), text_color=text_primary).pack(side=tk.LEFT, padx=(0, 10))
 
         self.new_port_type = tk.StringVar(value="ethernet")
 
         ctk.CTkRadioButton(add_frame, text="🔌 RJ45", variable=self.new_port_type, value="ethernet").pack(side=tk.LEFT,
-                                                                                                         padx=2)
-        ctk.CTkRadioButton(add_frame, text="🔆 PON", variable=self.new_port_type, value="pon").pack(side=tk.LEFT, padx=2)
+                                                                                                         padx=4)
+        ctk.CTkRadioButton(add_frame, text="🔆 PON", variable=self.new_port_type, value="pon").pack(side=tk.LEFT, padx=4)
         ctk.CTkRadioButton(add_frame, text="📶 Wi-Fi", variable=self.new_port_type, value="wifi").pack(side=tk.LEFT,
-                                                                                                      padx=2)
-        ctk.CTkRadioButton(add_frame, text="🔌 USB", variable=self.new_port_type, value="usb").pack(side=tk.LEFT, padx=2)
+                                                                                                      padx=4)
+        ctk.CTkRadioButton(add_frame, text="🔌 USB", variable=self.new_port_type, value="usb").pack(side=tk.LEFT, padx=4)
 
-        ctk.CTkButton(add_frame, text="➕ Добавить", command=self.add_new_port, width=100).pack(side=tk.RIGHT)
+        ctk.CTkButton(
+            add_frame, text="➕ Добавить",
+            command=self.add_new_port, width=110, height=32,
+            fg_color=primary, hover_color=primary_hover,
+            corner_radius=8, font=("Arial", 12, "bold")
+        ).pack(side=tk.RIGHT)
 
         # Кнопка тестовых данных
         test_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        test_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-        ctk.CTkButton(test_frame, text="🧪 Тестовые данные", command=self.fill_test_data).pack(side=tk.RIGHT)
+        test_frame.pack(fill=tk.X, padx=16, pady=(0, 12))
+        ctk.CTkButton(
+            test_frame, text="🧪 Тестовые данные",
+            command=self.fill_test_data, width=160, height=32,
+            fg_color=accent, hover_color=accent_hover,
+            corner_radius=8, font=("Arial", 12)
+        ).pack(side=tk.RIGHT)
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -1084,7 +1246,8 @@ class NodeCreationDialog:
         self.display_ports()
 
     def _get_canvas_bg_color(self):
-        return "#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "#ffffff"
+        from utils import theme
+        return theme.c("dialog_bg")
 
     def display_ports(self):
         """Отображает список портов."""
@@ -1128,6 +1291,9 @@ class NodeCreationDialog:
 
     def create_port_widget(self, port: Dict, show_network: bool = True):
         """Создаёт виджет для порта."""
+        from utils.theme import color as _tc
+        _inp = {"fg_color": _tc("input_bg"), "border_color": _tc("input_border"), "border_width": 1}
+
         frame = ctk.CTkFrame(self.ports_container, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2)
 
@@ -1148,15 +1314,16 @@ class NodeCreationDialog:
             self.port_vars[port["port_id"]] = {"mac": mac_var, "ip": ip_var, "mask": mask_var, "vlan_id": vlan_id_var,
                                                "vlan_mode": vlan_mode_var, "port": port}
 
-            ctk.CTkEntry(frame, textvariable=mac_var, width=120, placeholder_text="MAC").pack(side=tk.LEFT, padx=2)
-            ctk.CTkEntry(frame, textvariable=ip_var, width=110, placeholder_text="IP").pack(side=tk.LEFT, padx=2)
+            ctk.CTkEntry(frame, textvariable=mac_var, width=120, placeholder_text="MAC", **_inp).pack(side=tk.LEFT, padx=2)
+            ctk.CTkEntry(frame, textvariable=ip_var, width=110, placeholder_text="IP", **_inp).pack(side=tk.LEFT, padx=2)
             ctk.CTkLabel(frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
-            ctk.CTkEntry(frame, textvariable=mask_var, width=50, placeholder_text="маска").pack(side=tk.LEFT,
+            ctk.CTkEntry(frame, textvariable=mask_var, width=50, placeholder_text="маска", **_inp).pack(side=tk.LEFT,
                                                                                                 padx=(2, 5))
             ctk.CTkLabel(frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
-            ctk.CTkEntry(frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN").pack(side=tk.LEFT, padx=2)
-            ctk.CTkComboBox(frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90).pack(side=tk.LEFT,
-                                                                                                         padx=2)
+            ctk.CTkEntry(frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN", **_inp).pack(side=tk.LEFT, padx=2)
+            ctk.CTkComboBox(frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90,
+                            fg_color=_tc("input_bg"), border_color=_tc("input_border"),
+                            button_color=_tc("primary")).pack(side=tk.LEFT, padx=2)
         else:
             ctk.CTkLabel(frame, text="(USB порт)").pack(side=tk.LEFT, padx=2)
 
@@ -1166,6 +1333,9 @@ class NodeCreationDialog:
 
     def create_wifi_port_widget(self, port: Dict):
         """Создаёт виджет для Wi-Fi порта."""
+        from utils.theme import color as _tc
+        _inp = {"fg_color": _tc("input_bg"), "border_color": _tc("input_border"), "border_width": 1}
+
         frame = ctk.CTkFrame(self.ports_container, fg_color="transparent")
         frame.pack(fill=tk.X, pady=2, padx=2)
 
@@ -1209,15 +1379,17 @@ class NodeCreationDialog:
         self.port_vars[port["port_id"]] = {"mac": mac_var, "ip": ip_var, "mask": mask_var, "vlan_id": vlan_id_var,
                                            "vlan_mode": vlan_mode_var, "port": port}
 
-        ctk.CTkEntry(fields_frame, textvariable=mac_var, width=120, placeholder_text="MAC").pack(side=tk.LEFT, padx=2)
-        ctk.CTkEntry(fields_frame, textvariable=ip_var, width=110, placeholder_text="IP").pack(side=tk.LEFT, padx=2)
+        ctk.CTkEntry(fields_frame, textvariable=mac_var, width=120, placeholder_text="MAC", **_inp).pack(side=tk.LEFT, padx=2)
+        ctk.CTkEntry(fields_frame, textvariable=ip_var, width=110, placeholder_text="IP", **_inp).pack(side=tk.LEFT, padx=2)
         ctk.CTkLabel(fields_frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
-        ctk.CTkEntry(fields_frame, textvariable=mask_var, width=50, placeholder_text="маска").pack(side=tk.LEFT,
+        ctk.CTkEntry(fields_frame, textvariable=mask_var, width=50, placeholder_text="маска", **_inp).pack(side=tk.LEFT,
                                                                                                    padx=(2, 5))
         ctk.CTkLabel(fields_frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
-        ctk.CTkEntry(fields_frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN").pack(side=tk.LEFT,
+        ctk.CTkEntry(fields_frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN", **_inp).pack(side=tk.LEFT,
                                                                                                      padx=2)
-        ctk.CTkComboBox(fields_frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90).pack(
+        ctk.CTkComboBox(fields_frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90,
+                        fg_color=_tc("input_bg"), border_color=_tc("input_border"),
+                        button_color=_tc("primary")).pack(
             side=tk.LEFT, padx=2)
 
         if not is_busy:
@@ -1395,9 +1567,16 @@ class NodeCreationDialog:
         if not self.validate_network_fields():
             return
 
-        # Позиция узла
+        # Позиция узла.
+        # Промт 9 №4: если в режиме редактирования пользователь сменил зону,
+        # пересчитываем позицию на центр новой зоны — иначе узел визуально
+        # остаётся «висеть» по старым координатам до первого клика.
         if self.is_edit_mode:
-            node_position = self.existing_node.position
+            old_zone_id = self.existing_node.zone.id if self.existing_node.zone else None
+            if selected_zone and old_zone_id != selected_zone.id:
+                node_position = self.board.get_next_free_position(selected_zone)
+            else:
+                node_position = self.existing_node.position
         else:
             node_position = self.board.get_next_free_position(selected_zone)
 
@@ -1464,6 +1643,7 @@ class NodeCreationDialog:
             node = self.existing_node
             node.name = node_name
             node.zone = selected_zone
+            node.position = node_position  # обновляем координаты под (возможно новую) зону
             node.properties = properties
             node.ports = self.current_ports
         else:

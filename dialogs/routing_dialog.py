@@ -94,8 +94,9 @@ class RouteEditDialog:
         return interfaces if interfaces else ["eth0"]
 
     def create_widgets(self):
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+        from utils.theme import color as _tc
+        section_bg = _tc("dialog_bg")
+        border_clr = _tc("card_border")
         self.dialog.configure(fg_color=section_bg)
 
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
@@ -401,8 +402,9 @@ class RoutingTableDialog:
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
+        from utils.theme import color as _tc
+        section_bg = _tc("dialog_bg")
+        border_clr = _tc("card_border")
         self.dialog.configure(fg_color=section_bg)
 
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")

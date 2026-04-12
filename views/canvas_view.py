@@ -130,6 +130,29 @@ class CanvasView:
             return size
         return max(self.grid_size, round(size / self.grid_size) * self.grid_size)
 
+    def clamp_zone_move(self, zone: Zone, new_x: float, new_y: float) -> Tuple[float, float]:
+        """Ограничивает перемещение зоны так, чтобы она не накладывалась на
+        другие TIM-зоны (промт 9 №3).
+
+        Axis-separated движение: сначала проверяем полное движение, затем —
+        только по одной оси, что позволяет «скользить» вдоль края соседней
+        зоны. Если обе оси блокированы — возвращается исходная позиция.
+        """
+        w, h = zone.width, zone.height
+        # Полное движение
+        if not self.board.zone_rect_overlaps_any(new_x, new_y, w, h, exclude_id=zone.id):
+            return new_x, new_y
+
+        old_x, old_y = zone.x, zone.y
+        # Только по X
+        if not self.board.zone_rect_overlaps_any(new_x, old_y, w, h, exclude_id=zone.id):
+            return new_x, old_y
+        # Только по Y
+        if not self.board.zone_rect_overlaps_any(old_x, new_y, w, h, exclude_id=zone.id):
+            return old_x, new_y
+        # Обе оси блокированы
+        return old_x, old_y
+
     # ===== Зум: преобразование координат «мира» и холста =====
     def w2c(self, v: float) -> float:
         """World -> Canvas: умножает мировую координату/размер на текущий зум."""
@@ -408,86 +431,169 @@ class CanvasView:
             self.ICON_BOUNDS_CACHE.clear()
 
     def setup_ui(self):
-        """Настраивает пользовательский интерфейс."""
+        """Настраивает пользовательский интерфейс (промт 9 №7 — современный GUI).
+
+        Структура окна:
+        +-------------------+-------------------------------------+
+        |  Sidebar (240px)  |  Canvas area                        |
+        |  - brand          |                                     |
+        |  - Section 1      |                                     |
+        |    button         |       world canvas                  |
+        |    button         |                                     |
+        |  - Section 2      |                                     |
+        |    ...            |                                     |
+        |  <spacer>         |                                     |
+        |  divider          |                                     |
+        |  Theme toggle     |                                     |
+        +-------------------+-------------------------------------+
+        """
+        from utils import theme
+
         self.root.title("Автоматизированная система построения цифровых карт безопасности")
+        self.root.configure(fg_color=theme.color("window_bg"))
 
-        # Левая панель управления
-        control_frame = ctk.CTkFrame(self.root)
-        control_frame.pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=6)
+        # ===== Левая панель (фиксированная ширина 240px) =====
+        control_frame = ctk.CTkFrame(
+            self.root, width=240, fg_color=theme.color("sidebar_bg"),
+            corner_radius=0, border_width=0
+        )
+        control_frame.pack(side=tk.LEFT, fill=tk.Y)
+        control_frame.pack_propagate(False)
+        self._control_frame = control_frame
 
-        ctk.CTkLabel(control_frame, text="Режимы работы", font=("Arial", 16, "bold")).pack(anchor=tk.W, pady=(0, 4))
+        # --- Бренд/заголовок программы ---
+        brand = ctk.CTkFrame(control_frame, fg_color="transparent")
+        brand.pack(fill=tk.X, padx=18, pady=(20, 4))
+        ctk.CTkLabel(
+            brand, text="⬢  АС ЦКБ",
+            font=("Arial", 20, "bold"),
+            text_color=theme.color("primary"),
+            anchor="w",
+        ).pack(fill=tk.X)
+        ctk.CTkLabel(
+            brand,
+            text="Автоматизированная система\nпостроения цифровых карт\nбезопасности",
+            font=("Arial", 9),
+            text_color=theme.color("text_secondary"),
+            justify="left",
+            anchor="w",
+        ).pack(fill=tk.X, pady=(2, 14))
 
-        self.btn_add_zone = ctk.CTkButton(control_frame, text="Структура РИС", command=self.start_zone_creation)
-        self.btn_add_zone.pack(fill=tk.X, pady=2)
+        # --- Секции с кнопками ---
+        self.btn_add_zone = self._make_sidebar_button(
+            control_frame, "🗂  Структура РИС", self.start_zone_creation, variant="primary"
+        )
+        self.btn_add_node = self._make_sidebar_button(
+            control_frame, "➕  Добавить узел", self.show_add_node_dialog, variant="primary"
+        )
 
-        self.btn_add_node = ctk.CTkButton(control_frame, text="Добавить узел", command=self.show_add_node_dialog)
-        self.btn_add_node.pack(fill=tk.X, pady=2)
+        self._sidebar_section_label(control_frame, "СОЕДИНЕНИЯ")
+        self.btn_create_link = self._make_sidebar_button(
+            control_frame, "🔗  Создать связь", self.toggle_create_link_mode, variant="primary"
+        )
+        self.btn_delete_link = self._make_sidebar_button(
+            control_frame, "✂  Удалить связь", self.toggle_delete_link_mode, variant="primary"
+        )
 
-        self.btn_create_link = ctk.CTkButton(control_frame, text="Создание соединения", command=self.toggle_create_link_mode)
-        self.btn_create_link.pack(fill=tk.X, pady=2)
+        self._sidebar_section_label(control_frame, "ДЕЙСТВИЯ")
+        self.btn_delete = self._make_sidebar_button(
+            control_frame, "🗑  Удалить выбранное", self.delete_selected, variant="danger"
+        )
+        self.btn_clear = self._make_sidebar_button(
+            control_frame, "⟲  Очистить всё", self.clear_all, variant="danger"
+        )
 
-        self.btn_delete_link = ctk.CTkButton(control_frame, text="Удаление соединения", command=self.toggle_delete_link_mode)
-        self.btn_delete_link.pack(fill=tk.X, pady=2)
+        self._sidebar_section_label(control_frame, "АНАЛИЗ")
+        self.btn_connectivity = self._make_sidebar_button(
+            control_frame, "📊  Анализ связности", self.show_connectivity_report, variant="accent"
+        )
 
-        self.btn_delete = ctk.CTkButton(control_frame, text="Удалить выбранное", command=self.delete_selected)
-        self.btn_delete.pack(fill=tk.X, pady=2)
+        self._sidebar_section_label(control_frame, "НАСТРОЙКИ")
+        self.btn_grid = self._make_sidebar_button(
+            control_frame, "⊞  Настройки сетки", self.show_grid_settings, variant="ghost"
+        )
+        self.btn_scale = self._make_sidebar_button(
+            control_frame, "⇔  Масштаб интерфейса", self.show_scale_settings, variant="ghost"
+        )
 
-        self.btn_clear = ctk.CTkButton(control_frame, text="Очистить всё", command=self.clear_all)
-        self.btn_clear.pack(fill=tk.X, pady=2)
-
-        self.btn_connectivity = ctk.CTkButton(control_frame, text="Анализ связности", command=self.show_connectivity_report)
-        self.btn_connectivity.pack(fill=tk.X, pady=2)
-
-        ttk.Separator(control_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=6)
-
-        self.btn_grid = ctk.CTkButton(control_frame, text="Настройки сетки", command=self.show_grid_settings)
-        self.btn_grid.pack(fill=tk.X, pady=2)
-
-        self.btn_scale = ctk.CTkButton(control_frame, text="Масштаб интерфейса", command=self.show_scale_settings)
-        self.btn_scale.pack(fill=tk.X, pady=2)
-
-        # Список кнопок для временной блокировки (используется изолированным
-        # режимом редактирования зоны — промт 8 №8).
+        # Список кнопок для временной блокировки (изолированный режим зоны)
         self._control_buttons = [
             self.btn_add_zone, self.btn_add_node, self.btn_create_link,
             self.btn_delete_link, self.btn_delete, self.btn_clear,
             self.btn_connectivity, self.btn_grid, self.btn_scale,
         ]
 
-        # Правая область - холст c прокруткой
-        self._canvas_frame = ttk.Frame(self.root)
+        # --- Spacer (растягивается, чтобы прижать theme-toggle и статус к низу) ---
+        ctk.CTkFrame(control_frame, fg_color="transparent", height=1).pack(
+            fill=tk.BOTH, expand=True
+        )
+
+        # --- Статус-текст (если понадобится) ---
+        self.status_label = ctk.CTkLabel(
+            control_frame, text="", font=("Arial", 9),
+            text_color=theme.color("text_muted"), anchor="w"
+        )
+        self.status_label.pack(fill=tk.X, padx=18, pady=(0, 4))
+
+        # --- Разделитель перед кнопкой темы ---
+        ctk.CTkFrame(
+            control_frame, height=1, fg_color=theme.color("divider"),
+        ).pack(fill=tk.X, padx=18, pady=(4, 10))
+
+        # --- Переключатель темы (внизу слева — отделён как инструмент комфорта) ---
+        theme_btn_text = "🌙  Тёмная тема" if theme.current_mode() == "light" else "☀  Светлая тема"
+        self.btn_theme = self._make_sidebar_button(
+            control_frame, theme_btn_text, self.toggle_theme, variant="ghost"
+        )
+        # Чуть больше отступ снизу для кнопки темы
+        self.btn_theme.pack_configure(pady=(0, 18))
+
+        # ===== Правая область — холст =====
+        self._canvas_frame = ctk.CTkFrame(
+            self.root, fg_color=theme.color("window_bg"), corner_radius=0, border_width=0
+        )
         self._canvas_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
         canvas_frame = self._canvas_frame
 
-        # Скроллбары
-        h_scroll = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
-        v_scroll = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
+        # Внутренний отступ, чтобы холст стал «карточкой» с рамкой
+        canvas_card = ctk.CTkFrame(
+            canvas_frame, fg_color=theme.color("card_bg"),
+            border_width=1, border_color=theme.color("card_border"),
+            corner_radius=8
+        )
+        canvas_card.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self._canvas_card = canvas_card
 
+        # Скроллбары
+        h_scroll = ttk.Scrollbar(canvas_card, orient=tk.HORIZONTAL)
+        v_scroll = ttk.Scrollbar(canvas_card, orient=tk.VERTICAL)
+
+        canvas_bg = theme.c("canvas_bg")
         self.canvas = tk.Canvas(
-            canvas_frame, bg="white", width=1000, height=700,
+            canvas_card, bg=canvas_bg, width=1000, height=700,
             scrollregion=(0, 0, int(self.WORLD_WIDTH * self.zoom), int(self.WORLD_HEIGHT * self.zoom)),
             xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set,
-            highlightthickness=0,
+            highlightthickness=0, bd=0,
         )
 
         h_scroll.config(command=self.canvas.xview)
         v_scroll.config(command=self.canvas.yview)
 
-        # Индикатор текущего зума в нижнем правом углу (над скроллбарами).
-        # Поверх холста, справа-снизу — всегда виден поверх рисунка.
-        h_scroll.pack(side=tk.BOTTOM, fill=tk.X)
-        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        h_scroll.pack(side=tk.BOTTOM, fill=tk.X, padx=8, pady=(0, 8))
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 8), pady=(8, 0))
+        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(8, 0), pady=(8, 0))
 
+        # Индикатор zoom
+        zoom_bg = theme.c("card_bg")
+        zoom_fg = theme.c("text_primary")
         self.zoom_label = tk.Label(
             self.canvas,
             text=f"{int(round(self.zoom * 100))}%",
-            bg="#ffffff", fg="#333333",
+            bg=zoom_bg, fg=zoom_fg,
             font=("Arial", 10, "bold"),
-            bd=1, relief=tk.SOLID, padx=6, pady=2
+            bd=1, relief=tk.SOLID, padx=8, pady=3
         )
-        # place() относительно холста — всегда в правом нижнем углу видимой области
-        self.zoom_label.place(relx=1.0, rely=1.0, anchor="se", x=-6, y=-6)
+        self.zoom_label.place(relx=1.0, rely=1.0, anchor="se", x=-14, y=-14)
 
         # Привязка событий
         self.canvas.bind("<Button-1>", self.on_canvas_click)
@@ -497,15 +603,91 @@ class CanvasView:
         self.canvas.bind("<Motion>", self.on_canvas_motion)
         self.canvas.bind("<Double-Button-1>", self.on_canvas_double_click)
 
-        # Навигация: колесо — вертикальный скролл; Shift+колесо — горизонтальный;
-        # Ctrl+колесо — зум. Фокус на холсте нужен, чтобы события ловились.
         self.canvas.bind("<MouseWheel>", self._on_mouse_wheel)
         self.canvas.bind("<Shift-MouseWheel>", self._on_shift_mouse_wheel)
         self.canvas.bind("<Control-MouseWheel>", self._on_ctrl_mouse_wheel)
         self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
 
-        self.status_label = ttk.Label(control_frame, text="", font=("Arial", 9))
-        self.status_label.pack(fill=tk.X, pady=(10, 0))
+    # -----------------------------------------------------------------------
+    # Хелперы для современного sidebar
+    # -----------------------------------------------------------------------
+
+    def _sidebar_section_label(self, parent, text: str) -> None:
+        """Заголовок секции в sidebar — мелкие uppercase буквы, muted-цвет."""
+        from utils import theme
+        ctk.CTkLabel(
+            parent, text=text,
+            font=("Arial", 9, "bold"),
+            text_color=theme.color("text_muted"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=18, pady=(14, 4))
+
+    def _make_sidebar_button(self, parent, text: str, command, variant: str = "primary"):
+        """Создаёт кнопку sidebar с единым стилем.
+
+        variant:
+            primary  — заливка цветом primary (синий), белый текст;
+            accent   — фиолетовый акцент, белый текст;
+            danger   — красная, белый текст;
+            ghost    — прозрачный фон, текст primary; на hover — лёгкий фон.
+        """
+        from utils import theme
+
+        if variant == "primary":
+            fg = theme.color("primary")
+            hover = theme.color("primary_hover")
+            text_color = "#FFFFFF"
+        elif variant == "accent":
+            fg = theme.color("accent")
+            hover = theme.color("accent_hover")
+            text_color = "#FFFFFF"
+        elif variant == "danger":
+            fg = theme.color("danger")
+            hover = theme.color("danger_hover")
+            text_color = "#FFFFFF"
+        elif variant == "ghost":
+            fg = theme.color("ghost_bg")
+            hover = theme.color("ghost_hover")
+            text_color = theme.color("text_primary")
+        else:
+            fg = theme.color("primary")
+            hover = theme.color("primary_hover")
+            text_color = "#FFFFFF"
+
+        btn = ctk.CTkButton(
+            parent, text=text, command=command,
+            fg_color=fg, hover_color=hover, text_color=text_color,
+            font=("Arial", 12),
+            corner_radius=8, height=36, anchor="w",
+        )
+        btn.pack(fill=tk.X, padx=14, pady=3)
+        return btn
+
+    def toggle_theme(self) -> None:
+        """Переключает тему light ↔ dark, обновляет кнопку и перерисовывает
+        холст под новый фон (промт 9 №7)."""
+        from utils import theme
+        new_mode = "dark" if theme.current_mode() == "light" else "light"
+        theme.apply_theme(new_mode)
+
+        # Текст кнопки
+        if new_mode == "light":
+            self.btn_theme.configure(text="🌙  Тёмная тема")
+        else:
+            self.btn_theme.configure(text="☀  Светлая тема")
+
+        # Фон холста — обычный tk.Canvas не умеет tuple-цвета, обновляем вручную
+        try:
+            self.canvas.configure(bg=theme.c("canvas_bg"))
+        except Exception:
+            pass
+        # Индикатор zoom — тоже обычный tk.Label
+        try:
+            self.zoom_label.configure(bg=theme.c("card_bg"), fg=theme.c("text_primary"))
+        except Exception:
+            pass
+
+        self.redraw()
 
     def start_zone_creation(self):
         self.mode = "creating_zone"
@@ -517,42 +699,75 @@ class CanvasView:
             self.show_zone_creation_hint()
 
     def show_zone_creation_hint(self):
+        """Окно-инструкция с 4 шагами в горизонтальном ряду (промт-стиль2)."""
+        from utils.theme import color, style_dialog
+
         hint_window = ctk.CTkToplevel(self.root)
         hint_window.title("Создание зоны TIM")
-        hint_window.geometry("500x220")
         hint_window.resizable(False, False)
         hint_window.transient(self.root)
         hint_window.grab_set()
-
-        hint_window.update_idletasks()
-        x = (hint_window.winfo_screenwidth() // 2) - (250)
-        y = (hint_window.winfo_screenheight() // 2) - (140)
-        hint_window.geometry(f'500x220+{x}+{y}')
-
-        # При закрытии окна через крестик — отменяем режим создания зоны
+        hint_window.configure(fg_color=color("dialog_bg"))
         hint_window.protocol("WM_DELETE_WINDOW", lambda: self.cancel_zone_creation(hint_window))
 
-        hint_text = "Создание зоны TIM\n\n"
-        hint_text += "1. Нажмите и удерживайте левую кнопку мыши на холсте\n"
-        hint_text += "2. Перетащите курсор, чтобы выделить прямоугольную область\n"
-        hint_text += "3. Отпустите кнопку мыши, когда область будет нужного размера\n"
-        hint_text += "4. Введите название и описание зоны в появившемся окне"
+        main = ctk.CTkFrame(hint_window, fg_color="transparent")
+        main.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
 
-        ctk.CTkLabel(hint_window, text=hint_text, font=("Arial", 14), justify=tk.LEFT).pack(anchor=tk.W, padx=20,
-                                                                                            pady=(20, 15))
+        # Заголовок
+        ctk.CTkLabel(main, text="Инструкция: Как создать новую зону TIM",
+                      font=("Arial", 16, "bold"), text_color=color("text_primary"),
+                      anchor="w").pack(fill=tk.X, pady=(0, 20))
+
+        # --- 4 шага в горизонтальном ряду ---
+        steps_row = ctk.CTkFrame(main, fg_color="transparent")
+        steps_row.pack(fill=tk.X, pady=(0, 24))
+        for i in range(4):
+            steps_row.grid_columnconfigure(i, weight=1, uniform="step")
+
+        steps = [
+            ("1", "Удерживайте ЛКМ\nна холсте"),
+            ("2", "Перетащите для\nвыделения области"),
+            ("3", "Отпустите кнопку\nв нужной точке"),
+            ("4", "Укажите название\nи описание зоны"),
+        ]
+        for idx, (num, text) in enumerate(steps):
+            step_frame = ctk.CTkFrame(steps_row, fg_color="transparent")
+            step_frame.grid(row=0, column=idx, padx=6, sticky="n")
+
+            # Кружок с номером
+            circle = ctk.CTkFrame(step_frame, width=36, height=36,
+                                   fg_color=color("primary"), corner_radius=18)
+            circle.pack(pady=(0, 8))
+            circle.pack_propagate(False)
+            ctk.CTkLabel(circle, text=num, font=("Arial", 14, "bold"),
+                          text_color="#FFFFFF").pack(expand=True)
+
+            ctk.CTkLabel(step_frame, text=text, font=("Arial", 11),
+                          text_color=color("text_secondary"),
+                          justify="center", wraplength=140).pack()
+
+        # --- Чекбокс + кнопка «Понятно» ---
+        bottom = ctk.CTkFrame(main, fg_color="transparent")
+        bottom.pack(fill=tk.X, side=tk.BOTTOM)
 
         self.dont_show_var = tk.BooleanVar(value=False)
-        ctk.CTkCheckBox(hint_window, text="Больше не показывать это сообщение", variable=self.dont_show_var,
-                        font=("Arial", 12)).pack(anchor=tk.W, padx=20, pady=(0, 15))
+        ctk.CTkSwitch(bottom, text="Не показывать эту подсказку в будущем",
+                       variable=self.dont_show_var,
+                       font=("Arial", 11), text_color=color("text_muted")).pack(side=tk.LEFT)
 
-        button_frame = ctk.CTkFrame(hint_window, fg_color="transparent")
-        button_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
+        ctk.CTkButton(
+            bottom, text="Понятно",
+            command=lambda: self.close_hint_window(hint_window),
+            fg_color=color("success"), hover_color=color("success_hover"),
+            text_color="#FFFFFF", width=120, height=38,
+            corner_radius=10, font=("Arial", 13, "bold")
+        ).pack(side=tk.RIGHT)
 
-        ctk.CTkButton(button_frame, text="Понятно", command=lambda: self.close_hint_window(hint_window),
-                      width=100).pack(side=tk.RIGHT)
+        style_dialog(hint_window, width=660, height=280)
 
     def show_connectivity_report(self):
         """Показывает отчёт о сетевой связности в табличном виде."""
+        from utils import theme
         from models.connectivity_matrix import ConnectivityStatus
 
         matrix = self.board.get_connectivity_matrix()
@@ -566,12 +781,15 @@ class CanvasView:
         report_window.title("Анализ сетевой связности")
         report_window.geometry("900x600")
         report_window.transient(self.root)
+        report_window.configure(fg_color=theme.color("dialog_bg"))
 
         # Заголовок
         header = ctk.CTkFrame(report_window, fg_color="transparent")
         header.pack(fill=tk.X, padx=15, pady=(10, 5))
 
-        ctk.CTkLabel(header, text="Матрица сетевой связности", font=("Arial", 18, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(header, text="Матрица Сетевой Связности",
+                      font=("Arial", 18, "bold"),
+                      text_color=theme.color("text_primary")).pack(side=tk.LEFT)
 
         # Легенда
         legend_frame = ctk.CTkFrame(report_window, fg_color="transparent")
@@ -921,6 +1139,8 @@ class CanvasView:
             new_center_y = y - self.drag_zone_offset[1]
             new_x = self.snap_to_grid(new_center_x - self.drag_zone.width / 2.0)
             new_y = self.snap_to_grid(new_center_y - self.drag_zone.height / 2.0)
+            # Промт 9 №3: «упираемся» в соседние зоны вместо наложения
+            new_x, new_y = self.clamp_zone_move(self.drag_zone, new_x, new_y)
             if self.temp_elements:
                 self.canvas.coords(self.temp_elements[0],
                                    self.w2c(new_x), self.w2c(new_y),
@@ -983,11 +1203,19 @@ class CanvasView:
             self.creating_zone_rect = None
 
             if zone_width > 20 and zone_height > 20:
-                dialog = ZoneCreationDialog(self.root, zone_x, zone_y, zone_width, zone_height, self.board)
-                self.root.wait_window(dialog.dialog)
-                if dialog.result:
-                    self.board.add_zone(dialog.result)
-                    self.redraw()
+                # Промт 9 №3: нельзя создавать зону, накладывающуюся на другую.
+                if self.board.zone_rect_overlaps_any(zone_x, zone_y, zone_width, zone_height):
+                    messagebox.showerror(
+                        "Наложение зон",
+                        "Невозможно создать зону на этом месте — она пересекается "
+                        "с уже существующей зоной TIM. Выберите свободную область."
+                    )
+                else:
+                    dialog = ZoneCreationDialog(self.root, zone_x, zone_y, zone_width, zone_height, self.board)
+                    self.root.wait_window(dialog.dialog)
+                    if dialog.result:
+                        self.board.add_zone(dialog.result)
+                        self.redraw()
             else:
                 messagebox.showwarning("Предупреждение", "Зона слишком маленькая. Минимальный размер: 20x20 пикселей.")
             self.mode = "idle"
@@ -1037,6 +1265,8 @@ class CanvasView:
             new_center_y = y - self.drag_zone_offset[1]
             new_x = self.snap_to_grid(new_center_x - self.drag_zone.width / 2.0)
             new_y = self.snap_to_grid(new_center_y - self.drag_zone.height / 2.0)
+            # Промт 9 №3: clamping относительно других зон
+            new_x, new_y = self.clamp_zone_move(self.drag_zone, new_x, new_y)
             self.board.move_zone(self.drag_zone.id, new_x, new_y)
             self.clear_temp_elements()
             self.redraw()
@@ -1185,15 +1415,10 @@ class CanvasView:
         self.root.wait_window(dialog.dialog)
 
         if dialog.result:
-            updated_node = dialog.result
-            updated_node.id = node.id
-            updated_node.position = node.position
-
-            for i, n in enumerate(self.board.nodes):
-                if n.id == node.id:
-                    self.board.nodes[i] = updated_node
-                    break
-
+            # NodeCreationDialog в edit_mode уже корректно обновляет существующий
+            # узел (включая zone/position при смене зоны — промт 9 №4).
+            # Здесь остаётся только перерисовать холст.
+            self.clear_icon_bounds_cache(node.id)
             self.redraw()
 
     def show_node_security_passport(self, node: Node):
@@ -1327,26 +1552,36 @@ class CanvasView:
 
     def start_zone_resize(self, zone: Zone):
         """Входит в изолированный режим редактирования размера зоны
-        (промт 8 №8).
+        (промт 8 №8, промт 9 №2 — без тряски).
 
         - Отключает все управляющие кнопки слева;
         - Поверх холста появляется overlay с кнопками «Сохранить» / «Отмена»;
         - Единственное разрешённое действие — тянуть за уголки/грани зоны;
         - «Отмена» возвращает исходные размеры, «Сохранить» применяет.
+
+        Чтобы устранить визуальную «тряску» интерфейса при входе, полный
+        `redraw()` здесь НЕ вызывается. Вместо этого поверх существующей
+        картинки холста добавляются оранжевый overlay (заливка зоны +
+        контур + уголки) с тегом `zone_edit_ov`. Overlay с кнопками
+        Save/Cancel создаётся ОДНИМ махом и помещается до того, как
+        вызывается update_idletasks — так Tk показывает обе кнопки сразу.
         """
         self.zone_edit_mode = True
         self.zone_edit_zone = zone
         self.zone_edit_original = (zone.x, zone.y, zone.width, zone.height)
         self.selected_zone_id = zone.id
 
-        # Блокируем все управляющие кнопки
+        # Блокируем управляющие кнопки (без визуального эффекта — их родитель
+        # не меняет размер)
         for btn in self._control_buttons:
             try:
                 btn.configure(state="disabled")
             except Exception:
                 pass
 
-        # Overlay с кнопками Save/Cancel — поверх холста, в правом нижнем углу
+        # Overlay с кнопками Save/Cancel — поверх холста, в правом нижнем углу.
+        # Собираем ВСЕ виджеты скрытыми, place() делаем в конце одним махом,
+        # чтобы не было момента «кнопка отмены есть, сохранения нет».
         self.zone_edit_overlay = tk.Frame(
             self.canvas, bg="#ffffff", bd=1, relief=tk.SOLID
         )
@@ -1373,14 +1608,59 @@ class CanvasView:
         )
         cancel_btn.pack(side=tk.LEFT, padx=4)
 
-        # place в правом нижнем углу, выше индикатора зума
+        # Принудительно применяем внутренний layout overlay ДО place(),
+        # чтобы Tk уже знал его размеры и показал целиком за один кадр.
+        self.zone_edit_overlay.update_idletasks()
+
+        # place() в правом нижнем углу, выше индикатора зума
         self.zone_edit_overlay.place(relx=1.0, rely=1.0, anchor="se", x=-6, y=-40)
 
-        # Первая отрисовка (чтобы показать уголки редактируемой зоны)
-        self.redraw()
+        # Добавляем overlay на канвасе (оранжевый контур + уголки) без полного
+        # redraw() — это устраняет «тряску» интерфейса.
+        self._draw_zone_edit_overlay()
+
+    def _draw_zone_edit_overlay(self) -> None:
+        """Рисует поверх существующей картинки оранжевую заливку зоны,
+        контур и уголки-«захваты». Все элементы с тегом `zone_edit_ov`,
+        чтобы их можно было массово удалить при выходе из режима.
+        """
+        if not self.zone_edit_zone:
+            return
+        # Сначала снимаем старый overlay (если был от предыдущего кадра)
+        self.canvas.delete("zone_edit_ov")
+
+        zone = self.zone_edit_zone
+        x1 = self.w2c(zone.x)
+        y1 = self.w2c(zone.y)
+        x2 = self.w2c(zone.x + zone.width)
+        y2 = self.w2c(zone.y + zone.height)
+
+        # Полупрозрачная заливка отсутствует в Tk Canvas — используем
+        # прямоугольник с stipple, он создаёт визуальный эффект заливки.
+        self.canvas.create_rectangle(
+            x1, y1, x2, y2, outline="#FF9800", width=3,
+            fill="#FFF8E1", stipple="gray25",
+            tags=("zone_edit_ov",),
+        )
+
+        handle = 6
+        for cx, cy in [(x1, y1), (x2, y1), (x1, y2), (x2, y2)]:
+            self.canvas.create_rectangle(
+                cx - handle, cy - handle, cx + handle, cy + handle,
+                fill="#FF9800", outline="#E65100", width=2,
+                tags=("zone_edit_ov",),
+            )
 
     def _zone_edit_exit(self) -> None:
-        """Выход из изолированного режима — общая очистка."""
+        """Выход из изолированного режима — общая очистка.
+
+        Промт 9 №2: убран полный `redraw()` при выходе, чтобы интерфейс
+        не «трясло». Вместо этого удаляется только overlay (`zone_edit_ov`),
+        а уже отрендеренный контент холста остаётся на месте. Полный redraw
+        выполняется только в cancel, где реально изменились размеры зоны.
+        """
+        was_cancelled = getattr(self, "_zone_edit_cancelled_flag", False)
+
         self.zone_edit_mode = False
         self.zone_edit_zone = None
         self.zone_edit_original = None
@@ -1388,6 +1668,7 @@ class CanvasView:
         self.resize_zone = None
         self.resize_zone_corner = None
         self.resize_zone_start = None
+        self._zone_edit_cancelled_flag = False
 
         if self.zone_edit_overlay is not None:
             try:
@@ -1405,7 +1686,15 @@ class CanvasView:
 
         self.clear_temp_elements()
         self.canvas.config(cursor="")
-        self.redraw()
+
+        # Снимаем overlay с канваса (оранжевый контур + уголки)
+        self.canvas.delete("zone_edit_ov")
+
+        # Полный redraw нужен только если отмена откатила размеры.
+        # При save — канвас уже актуален (обновлялся в drag), достаточно
+        # снять overlay.
+        if was_cancelled:
+            self.redraw()
 
     def _zone_edit_save(self) -> None:
         """Применить изменения и выйти из режима."""
@@ -1418,6 +1707,7 @@ class CanvasView:
             ox, oy, ow, oh = self.zone_edit_original
             # Используем board.resize_zone для корректности проверок
             self.board.resize_zone(zone.id, ox, oy, ow, oh)
+        self._zone_edit_cancelled_flag = True
         self._zone_edit_exit()
 
     def delete_node(self, node: Node):
@@ -1461,27 +1751,30 @@ class CanvasView:
         return NODE_TYPE_RUSSIAN.get(node_type_en, node_type_en)
 
     def redraw(self):
+        from utils import theme
+
         self.canvas.delete("all")
 
         z_scale = self.zoom
 
-        # Рисуем зоны TIM (без подсветки выбранной и без уголков ресайза)
+        # Актуальные цвета под текущую тему (важно — пересчитывается на
+        # каждом redraw, чтобы переключение темы применилось немедленно).
+        zone_fill = theme.c("surface_alt")
+        zone_outline = theme.c("divider")
+        text_primary = theme.c("text_primary")
+        text_secondary = theme.c("text_secondary")
+        node_label_color = theme.c("text_primary")
+
+        # Рисуем зоны TIM (подсветка edit-режима добавляется отдельным
+        # overlay через _draw_zone_edit_overlay, чтобы избежать «тряски»).
         for z in self.board.get_tim_zones():
             wx1, wy1, wx2, wy2 = z.to_canvas()
             x1, y1, x2, y2 = self.w2c(wx1), self.w2c(wy1), self.w2c(wx2), self.w2c(wy2)
-            # В изолированном режиме выделяем редактируемую зону оранжевым контуром
-            if (self.zone_edit_mode and self.zone_edit_zone is not None
-                    and z.id == self.zone_edit_zone.id):
-                self.canvas.create_rectangle(x1, y1, x2, y2, outline="#FF9800",
-                                              fill="#FFF8E1", width=3)
-            else:
-                self.canvas.create_rectangle(x1, y1, x2, y2, outline="black",
-                                              fill="#f0f0f0", width=2)
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline=zone_outline,
+                                          fill=zone_fill, width=2)
 
             # Названия зон в мировых размерах (пропорционально самой зоне)
             main_text = z.get_display_text()
-            # Базовый размер шрифта зависит от высоты зоны (мировой),
-            # далее конвертируется в экранные пиксели через зум.
             base_title = max(10, min(28, int(round(z.height * 0.05))))
             base_sub = max(8, min(20, int(round(z.height * 0.035))))
             base_desc = max(7, min(16, int(round(z.height * 0.028))))
@@ -1489,14 +1782,14 @@ class CanvasView:
             title_y_world = 15 + base_title / 2
             self.canvas.create_text(
                 (x1 + x2) / 2, y1 + title_y_world * z_scale,
-                text=main_text, fill="#333333",
+                text=main_text, fill=text_primary,
                 font=self.font_scaled(base_title, "bold"), anchor="center")
 
             if z.name:
                 sub_y_world = title_y_world + base_title + 4
                 self.canvas.create_text(
                     (x1 + x2) / 2, y1 + sub_y_world * z_scale,
-                    text=z.name, fill="black",
+                    text=z.name, fill=text_primary,
                     font=self.font_scaled(base_sub), anchor="center")
 
             if z.description:
@@ -1506,7 +1799,7 @@ class CanvasView:
                     desc_y_world = title_y_world + base_title + 4
                 self.canvas.create_text(
                     (x1 + x2) / 2, y1 + desc_y_world * z_scale,
-                    text=z.description, fill="#333333",
+                    text=z.description, fill=text_secondary,
                     font=self.font_scaled(base_desc), anchor="center")
 
         # Рисуем соединения
@@ -1595,8 +1888,8 @@ class CanvasView:
                 color = self.NODE_COLORS.get(n.type, "#999999")
                 self.canvas.create_rectangle(x, y, x + w, y + h, fill=color, outline=outline_color, width=outline_width)
 
-            self.canvas.create_text(x + w / 2, y + h + 5 * z_scale, text=n.name, anchor="n", fill="black",
-                                    font=self.font_scaled(9))
+            self.canvas.create_text(x + w / 2, y + h + 5 * z_scale, text=n.name, anchor="n",
+                                    fill=node_label_color, font=self.font_scaled(9))
 
             # Индикаторы статуса
             led_x = x + w - 8 * z_scale
@@ -1612,21 +1905,10 @@ class CanvasView:
                 self.canvas.create_oval(led_x - led_radius, led_y - led_radius, led_x + led_radius, led_y + led_radius,
                                         fill="#F44336", outline="#B71C1C", width=1)
 
-        # Отрисовка уголков ресайза редактируемой зоны (изолированный режим).
-        # Рисуем поверх всего остального, чтобы уголки были видны всегда.
+        # После полного redraw восстанавливаем overlay редактируемой зоны.
+        # (Он не рисуется внутри цикла зон — это отдельный слой с тегом.)
         if self.zone_edit_mode and self.zone_edit_zone is not None:
-            zone = self.zone_edit_zone
-            zx1 = self.w2c(zone.x)
-            zy1 = self.w2c(zone.y)
-            zx2 = self.w2c(zone.x + zone.width)
-            zy2 = self.w2c(zone.y + zone.height)
-            handle = 6
-            corners = [(zx1, zy1), (zx2, zy1), (zx1, zy2), (zx2, zy2)]
-            for cx, cy in corners:
-                self.canvas.create_rectangle(
-                    cx - handle, cy - handle, cx + handle, cy + handle,
-                    fill="#FF9800", outline="#E65100", width=2
-                )
+            self._draw_zone_edit_overlay()
 
         # Намеренно НЕ вызываем canvas.update() здесь — форсированный flush
         # при каждом redraw приводил к «ghost frame» при zoom. Обновление

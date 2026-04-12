@@ -344,6 +344,31 @@ class Board:
         """
         return [z for z in self.zones if z.zone_type == "tim"]
 
+    @staticmethod
+    def _rects_overlap(r1: Tuple[float, float, float, float],
+                        r2: Tuple[float, float, float, float]) -> bool:
+        """Проверяет пересечение двух прямоугольников (x, y, w, h).
+
+        Касание границами не считается пересечением.
+        """
+        x1, y1, w1, h1 = r1
+        x2, y2, w2, h2 = r2
+        return not (x1 + w1 <= x2 or x2 + w2 <= x1 or
+                    y1 + h1 <= y2 or y2 + h2 <= y1)
+
+    def zone_rect_overlaps_any(self, x: float, y: float, w: float, h: float,
+                                 exclude_id: Optional[str] = None) -> bool:
+        """Проверяет, пересекается ли прямоугольник (x, y, w, h) с какой-либо
+        TIM-зоной (кроме exclude_id). Используется при создании и перемещении
+        зон, чтобы они не накладывались друг на друга (промт 9 №3).
+        """
+        for z in self.get_tim_zones():
+            if exclude_id and z.id == exclude_id:
+                continue
+            if self._rects_overlap((x, y, w, h), (z.x, z.y, z.width, z.height)):
+                return True
+        return False
+
     def get_next_free_position(self, zone: 'Zone', node_size: Tuple[float, float] = (60.0, 60.0)) -> Tuple[
         float, float]:
         """

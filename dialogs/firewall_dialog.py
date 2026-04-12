@@ -118,6 +118,9 @@ class FirewallDialog:
         return mapping.get(node_type_en, node_type_en)
 
     def create_widgets(self):
+        from utils.theme import color as _ftc
+        self.dialog.configure(fg_color=_ftc("dialog_bg"))
+
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -125,8 +128,11 @@ class FirewallDialog:
         top_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         top_frame.pack(fill=tk.X, pady=(0, 10))
 
-        # Заголовок
-        title_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
+        # Заголовок — в обводке primary
+        from utils.theme import color as _tc
+        title_frame = ctk.CTkFrame(top_frame, fg_color=_tc("card_bg"),
+                                    border_width=2, border_color=_tc("primary"),
+                                    corner_radius=10)
         title_frame.pack(fill=tk.X, padx=10, pady=10)
 
         ctk.CTkLabel(title_frame, text="🛡", font=("Arial", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
@@ -530,10 +536,21 @@ class FirewallRuleDialog:
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        # Единый стиль секций (промт 8 №12: унификация разнотонности)
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        border_clr = "#CCCCCC" if ctk.get_appearance_mode() == "Light" else "#3D3D3D"
-        self.dialog.configure(fg_color=section_bg)
+        # Промт 9 №6: современный стиль — палитра из utils.theme,
+        # акцентные полоски, акцентные заголовки секций.
+        from utils import theme
+
+        surface_bg = theme.color("surface")
+        card_bg = theme.color("card_bg")
+        border_clr = theme.color("card_border")
+        primary = theme.color("primary")
+        primary_hover = theme.color("primary_hover")
+        danger = theme.color("danger")
+        danger_hover = theme.color("danger_hover")
+        text_primary = theme.color("text_primary")
+        text_muted = theme.color("text_muted")
+
+        self.dialog.configure(fg_color=surface_bg)
 
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
@@ -542,19 +559,30 @@ class FirewallRuleDialog:
         title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         title_frame.pack(fill=tk.X, pady=(0, 15))
 
-        ctk.CTkLabel(title_frame, text="📋" if not self.rule else "✏", font=("Arial", 28), text_color="#1E88E5").pack(
-            side=tk.LEFT, padx=(0, 10))
-        ctk.CTkLabel(title_frame, text="Создание правила" if not self.rule else f"Редактирование: {self.rule.name}",
-                     font=("Arial", 18, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(title_frame, text="📋" if not self.rule else "✏",
+                      font=("Arial", 28), text_color=primary).pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkLabel(title_frame,
+                      text="Создание правила" if not self.rule else f"Редактирование: {self.rule.name}",
+                      font=("Arial", 18, "bold"), text_color=text_primary).pack(side=tk.LEFT)
+
+        def section(header_text: str, subtitle: str = "") -> ctk.CTkFrame:
+            """Создаёт секцию-card с акцентной полоской и заголовком."""
+            frame = ctk.CTkFrame(main_frame, fg_color=card_bg,
+                                  border_width=1, border_color=border_clr, corner_radius=10)
+            frame.pack(fill=tk.X, pady=(0, 10))
+            # Синяя полоска убрана по запросу пользователя
+            header = ctk.CTkFrame(frame, fg_color="transparent")
+            header.pack(fill=tk.X, padx=16, pady=(10, 4))
+            ctk.CTkLabel(header, text=header_text, font=("Arial", 14, "bold"),
+                          text_color=text_primary, anchor="w").pack(side=tk.LEFT)
+            if subtitle:
+                ctk.CTkLabel(header, text=subtitle, font=("Arial", 10),
+                              text_color=text_muted, anchor="w").pack(side=tk.LEFT, padx=(12, 0))
+            return frame
 
         # Выбор интерфейса
-        interface_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
-                                        border_width=1, border_color=border_clr, corner_radius=8)
-        interface_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ctk.CTkLabel(interface_frame, text="Применить к интерфейсу", font=("Arial", 13, "bold")).pack(anchor=tk.W,
-                                                                                                        padx=10,
-                                                                                                        pady=(10, 5))
+        interface_frame = section("🔌 Применить к интерфейсу",
+                                   "любой или конкретный порт узла")
 
         network_ports = [p for p in self.node.ports if p["port_type"] in ["ethernet", "pon", "wifi"]]
         self.interface_var = tk.StringVar(value="any")
@@ -569,44 +597,38 @@ class FirewallRuleDialog:
                                value=port["port_id"]).pack(anchor=tk.W, padx=40, pady=2)
 
         # Действие и направление
-        action_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
-                                      border_width=1, border_color=border_clr, corner_radius=8)
-        action_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ctk.CTkLabel(action_frame, text="Действие и направление", font=("Arial", 13, "bold")).pack(anchor=tk.W,
-                                                                                                      padx=10,
-                                                                                                      pady=(10, 5))
+        action_frame = section("⚡ Действие и направление",
+                                "что делаем с трафиком и в каком направлении")
 
         action_row = ctk.CTkFrame(action_frame, fg_color="transparent")
-        action_row.pack(fill=tk.X, padx=10, pady=5)
+        action_row.pack(fill=tk.X, padx=16, pady=5)
 
-        ctk.CTkLabel(action_row, text="Действие:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(action_row, text="Действие:", width=100, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         self.action_var = tk.StringVar(value=self.rule.action if self.rule else "allow")
         ctk.CTkRadioButton(action_row, text="Разрешить", variable=self.action_var, value="allow").pack(side=tk.LEFT,
                                                                                                          padx=(10, 20))
         ctk.CTkRadioButton(action_row, text="Блокировать", variable=self.action_var, value="block").pack(side=tk.LEFT)
 
         dir_row = ctk.CTkFrame(action_frame, fg_color="transparent")
-        dir_row.pack(fill=tk.X, padx=10, pady=5)
+        dir_row.pack(fill=tk.X, padx=16, pady=(5, 10))
 
-        ctk.CTkLabel(dir_row, text="Направление:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(dir_row, text="Направление:", width=100, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         self.direction_var = tk.StringVar(value=self.rule.direction if self.rule else "in")
         ctk.CTkRadioButton(dir_row, text="Входящее", variable=self.direction_var, value="in").pack(side=tk.LEFT,
                                                                                                      padx=(10, 20))
         ctk.CTkRadioButton(dir_row, text="Исходящее", variable=self.direction_var, value="out").pack(side=tk.LEFT)
 
         # Протокол и порты
-        ports_frame = ctk.CTkFrame(main_frame, fg_color=section_bg,
-                                     border_width=1, border_color=border_clr, corner_radius=8)
-        ports_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ctk.CTkLabel(ports_frame, text="Протокол и порты", font=("Arial", 13, "bold")).pack(anchor=tk.W, padx=10,
-                                                                                              pady=(10, 5))
+        ports_frame = section("🔀 Протокол и порты",
+                               "фильтр по L4-протоколу и портам")
 
         proto_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        proto_row.pack(fill=tk.X, padx=10, pady=5)
+        proto_row.pack(fill=tk.X, padx=16, pady=5)
 
-        ctk.CTkLabel(proto_row, text="Протокол:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(proto_row, text="Протокол:", width=100, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         self.protocol_var = tk.StringVar(value=self.rule.protocol if self.rule else "any")
 
         protocols = [("Любой", "any"), ("TCP", "tcp"), ("UDP", "udp"), ("ICMP", "icmp")]
@@ -615,52 +637,67 @@ class FirewallRuleDialog:
 
         # Локальный порт
         local_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        local_row.pack(fill=tk.X, padx=10, pady=5)
+        local_row.pack(fill=tk.X, padx=16, pady=5)
 
-        ctk.CTkLabel(local_row, text="Локальный порт:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(local_row, text="Локальный порт:", width=110, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         self.local_port_var = tk.StringVar(value=self.rule.local_ports if self.rule else "")
         ctk.CTkEntry(local_row, textvariable=self.local_port_var, width=150, placeholder_text="80,443").pack(
             side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(local_row, text="(номер или список)", font=("Arial", 10), text_color="gray").pack(side=tk.LEFT)
+        ctk.CTkLabel(local_row, text="(номер или список)", font=("Arial", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
 
         # Удаленный порт
         remote_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        remote_row.pack(fill=tk.X, padx=10, pady=5)
+        remote_row.pack(fill=tk.X, padx=16, pady=5)
 
-        ctk.CTkLabel(remote_row, text="Удаленный порт:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(remote_row, text="Удаленный порт:", width=110, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         self.remote_port_var = tk.StringVar(value=self.rule.remote_ports if self.rule else "")
         ctk.CTkEntry(remote_row, textvariable=self.remote_port_var, width=150, placeholder_text="80,443").pack(
             side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Arial", 10), text_color="gray").pack(
-            side=tk.LEFT)
+        ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Arial", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
 
-        # Удаленная сеть (внутри ports_frame — прозрачный фон, чтобы не было разнотонности)
+        # Удаленная сеть
         remote_net_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        remote_net_frame.pack(fill=tk.X, padx=10, pady=5)
+        remote_net_frame.pack(fill=tk.X, padx=16, pady=(5, 12))
 
-        ctk.CTkLabel(remote_net_frame, text="Удаленная сеть:", width=100, anchor=tk.W).pack(side=tk.LEFT)
+        ctk.CTkLabel(remote_net_frame, text="Удаленная сеть:", width=110, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
         initial_value = self.rule.remote_addresses if self.rule and self.rule.remote_addresses != "any" else ""
         self.remote_network_var = tk.StringVar(value=initial_value)
         ctk.CTkEntry(remote_net_frame, textvariable=self.remote_network_var, width=200,
                      placeholder_text="192.168.1.0/24").pack(side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_net_frame, text="(формат: IP/маска)", font=("Arial", 10), text_color="gray").pack(
-            side=tk.LEFT)
+        ctk.CTkLabel(remote_net_frame, text="(формат: IP/маска)", font=("Arial", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
 
         # Тестовые данные
         test_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         test_frame.pack(fill=tk.X, pady=10)
 
-        ctk.CTkButton(test_frame, text="🧪 Заполнить тестовыми данными", command=self.fill_test_data,
-                      fg_color="#4CAF50").pack(side=tk.RIGHT)
+        ctk.CTkButton(
+            test_frame, text="🧪 Заполнить тестовыми данными",
+            command=self.fill_test_data, height=34, corner_radius=8,
+            fg_color=theme.color("accent"), hover_color=theme.color("accent_hover"),
+            font=("Arial", 12)
+        ).pack(side=tk.RIGHT)
 
         # Кнопки
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         btn_frame.pack(fill=tk.X, pady=(15, 0))
 
-        ctk.CTkButton(btn_frame, text="✕ Отмена", command=self.dialog.destroy, width=120, height=38,
-                      fg_color="#CD3333").pack(side=tk.LEFT, padx=5)
-        ctk.CTkButton(btn_frame, text="💾 Сохранить правило", command=self.save_rule, width=160, height=38,
-                      fg_color="#4CAF50", font=("Arial", 13, "bold")).pack(side=tk.RIGHT, padx=5)
+        ctk.CTkButton(
+            btn_frame, text="✕ Отмена", command=self.dialog.destroy,
+            width=120, height=38, corner_radius=8,
+            fg_color=danger, hover_color=danger_hover, font=("Arial", 13)
+        ).pack(side=tk.LEFT, padx=5)
+        ctk.CTkButton(
+            btn_frame, text="💾 Сохранить правило", command=self.save_rule,
+            width=180, height=38, corner_radius=8,
+            fg_color=primary, hover_color=primary_hover,
+            font=("Arial", 13, "bold")
+        ).pack(side=tk.RIGHT, padx=5)
 
     def fill_test_data(self):
         """Заполняет поля тестовыми данными."""

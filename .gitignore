@@ -9,8 +9,13 @@ build/
 .DS_Store
 Thumbs.db
 database/cve_database.db
+database/cve_database_v2.db
+database/cve_database_v2.db-shm
+database/cve_database_v2.db-wal
+database/cve_db_v1_backup.py
 
 # Локальные конфиги и рабочие материалы — не для репозитория
 .claude/
 Promts/
 config/scaling.json
+config/theme.json

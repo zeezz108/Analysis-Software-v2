@@ -74,10 +74,14 @@ class VPNConfigDialog:
         self.dialog.geometry(f'{width}x{height}+{x}+{y}')
 
     def create_widgets(self):
-        """Создаёт основной интерфейс диалога."""
-        # Единый цвет фона для всех секций
-        section_bg = "#F5F5F5" if ctk.get_appearance_mode() == "Light" else "#2B2B2B"
-        self.dialog.configure(fg_color=section_bg)
+        """Создаёт основной интерфейс диалога (промт-стиль2 — тёмная палитра)."""
+        from utils.theme import color
+
+        from utils.theme import color
+        dialog_bg = color("dialog_bg")
+        card_bg = color("card_bg")
+
+        self.dialog.configure(fg_color=dialog_bg)
 
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
@@ -89,19 +93,20 @@ class VPNConfigDialog:
             font=("Arial", 18, "bold")
         ).pack(pady=(0, 20))
 
-        # ===== ГОРИЗОНТАЛЬНАЯ РАСКЛАДКА БЛОКОВ =====
-        # Промт 8 №2: блоки VPN-Клиент и VPN-Сервер расположены бок о бок.
+        # Горизонтальная раскладка блоков
         blocks_row = ctk.CTkFrame(main_frame, fg_color="transparent")
         blocks_row.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+        blocks_row.grid_columnconfigure(0, weight=1, uniform="vpn")
+        blocks_row.grid_columnconfigure(1, weight=1, uniform="vpn")
+        blocks_row.grid_rowconfigure(0, weight=1)
 
         # ===== БЛОК КЛИЕНТА (слева) =====
-        client_frame = ctk.CTkFrame(blocks_row, fg_color=section_bg, border_width=1,
-                                     border_color="#42A5F5", corner_radius=8)
-        client_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+        client_frame = ctk.CTkFrame(blocks_row, fg_color=card_bg, border_width=2,
+                                     border_color="#42A5F5", corner_radius=10)
+        client_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
 
         # Цветная полоска-заголовок
-        client_accent = ctk.CTkFrame(client_frame, fg_color="#42A5F5", height=3, corner_radius=0)
-        client_accent.pack(fill=tk.X)
+        # Синяя полоска убрана по запросу пользователя
 
         client_header = ctk.CTkFrame(client_frame, fg_color="transparent")
         client_header.pack(fill=tk.X, padx=15, pady=(10, 10))
@@ -130,13 +135,12 @@ class VPNConfigDialog:
         self.create_client_settings(self.client_settings)
 
         # ===== БЛОК СЕРВЕРА (справа) =====
-        server_frame = ctk.CTkFrame(blocks_row, fg_color=section_bg, border_width=1,
-                                     border_color="#66BB6A", corner_radius=8)
-        server_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(8, 0))
+        server_frame = ctk.CTkFrame(blocks_row, fg_color=card_bg, border_width=2,
+                                     border_color="#66BB6A", corner_radius=10)
+        server_frame.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
 
         # Цветная полоска-заголовок
-        server_accent = ctk.CTkFrame(server_frame, fg_color="#66BB6A", height=3, corner_radius=0)
-        server_accent.pack(fill=tk.X)
+        # Зелёная полоска убрана по запросу пользователя
 
         server_header = ctk.CTkFrame(server_frame, fg_color="transparent")
         server_header.pack(fill=tk.X, padx=15, pady=(10, 10))
@@ -286,19 +290,26 @@ class VPNConfigDialog:
         status_row = ctk.CTkFrame(status_frame, fg_color="transparent")
         status_row.pack(fill=tk.X, pady=5)
 
+        # Кнопка справа (фиксированная ширина), статус слева. Label'у даём
+        # wraplength, чтобы длинный текст переносился на следующую строку
+        # и НЕ расширял блок (промт 9 №1). anchor=w + side=left вместе с
+        # grid-раскладкой колонок гарантирует стабильную ширину блока.
+        ctk.CTkButton(
+            status_row, text="Проверить соединение",
+            command=self.check_connection, width=180, height=30
+        ).pack(side=tk.RIGHT, padx=(5, 0))
+
         self.connection_status_var = tk.StringVar(value="Отключено")
         self.status_label = ctk.CTkLabel(
             status_row,
             textvariable=self.connection_status_var,
             font=("Arial", 12, "bold"),
-            text_color="red"
+            text_color="red",
+            anchor="w",
+            wraplength=260,
+            justify="left",
         )
-        self.status_label.pack(side=tk.LEFT)
-
-        ctk.CTkButton(
-            status_row, text="Проверить соединение",
-            command=self.check_connection, width=180, height=30
-        ).pack(side=tk.RIGHT)
+        self.status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
     def create_server_settings(self, parent):
         """Создаёт настройки для VPN-сервера."""
