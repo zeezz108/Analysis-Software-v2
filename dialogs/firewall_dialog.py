@@ -135,15 +135,15 @@ class FirewallDialog:
                                     corner_radius=10)
         title_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        ctk.CTkLabel(title_frame, text="🛡", font=("Arial", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkLabel(title_frame, text="🛡", font=("Segoe UI", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
 
         header_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
         header_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ctk.CTkLabel(header_frame, text="Межсетевой экран", font=("Arial", 20, "bold")).pack(anchor=tk.W)
+        ctk.CTkLabel(header_frame, text="Межсетевой экран", font=("Segoe UI", 20, "bold")).pack(anchor=tk.W)
         ctk.CTkLabel(
             header_frame, text=f"Узел: {self.node.name} | Тип: {self.get_node_type_russian(self.node.type)}",
-            font=("Arial", 11), text_color="gray"
+            font=("Segoe UI", 11), text_color="gray"
         ).pack(anchor=tk.W)
 
         # Статус брандмауэра (промт 8 №12: обводка только вокруг «Включен/Отключен»,
@@ -155,7 +155,7 @@ class FirewallDialog:
         left_status = ctk.CTkFrame(status_frame, fg_color="transparent")
         left_status.pack(side=tk.LEFT)
 
-        ctk.CTkLabel(left_status, text="Состояние:", font=("Arial", 13, "bold")).pack(side=tk.LEFT, padx=(10, 5))
+        ctk.CTkLabel(left_status, text="Состояние:", font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT, padx=(10, 5))
 
         # Обводка только вокруг самого статуса
         self.status_pill = ctk.CTkFrame(
@@ -167,7 +167,7 @@ class FirewallDialog:
         self.status_var = tk.StringVar(value="Включен" if self.manager.firewall_enabled else "Отключен")
         self.status_label = ctk.CTkLabel(
             self.status_pill, textvariable=self.status_var,
-            font=("Arial", 13, "bold"),
+            font=("Segoe UI", 13, "bold"),
             text_color="green" if self.manager.firewall_enabled else "red"
         )
         self.status_label.pack(side=tk.LEFT, padx=10, pady=3)
@@ -177,7 +177,7 @@ class FirewallDialog:
             status_frame, text="🔴 Выключить" if self.manager.firewall_enabled else "🟢 Включить",
             command=self.toggle_firewall, width=140, height=36,
             fg_color="#F44336" if self.manager.firewall_enabled else "#4CAF50",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         )
         self.toggle_firewall_btn.pack(side=tk.RIGHT, padx=10)
 
@@ -206,7 +206,7 @@ class FirewallDialog:
         ctk.CTkCheckBox(
             bottom_frame, text="Показывать уведомления о блокировках",
             variable=self.notify_var, command=self.toggle_notifications,
-            font=("Arial", 11)
+            font=("Segoe UI", 11)
         ).pack(side=tk.LEFT, padx=10)
 
         btn_frame = ctk.CTkFrame(bottom_frame, fg_color="transparent")
@@ -221,10 +221,10 @@ class FirewallDialog:
     def create_left_navigation(self, parent):
         """Создаёт левую панель с фильтрами."""
         # Заголовок
-        ctk.CTkLabel(parent, text="🔍 Фильтры", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 10))
+        ctk.CTkLabel(parent, text="🔍 Фильтры", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         # Направление
-        ctk.CTkLabel(parent, text="Направление:", font=("Arial", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 5))
+        ctk.CTkLabel(parent, text="Направление:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 5))
 
         self.direction_var = tk.StringVar(value="all")
 
@@ -239,7 +239,7 @@ class FirewallDialog:
         ctk.CTkFrame(parent, height=2, fg_color="gray").pack(fill=tk.X, padx=10, pady=15)
 
         # Действие
-        ctk.CTkLabel(parent, text="Действие:", font=("Arial", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(0, 5))
+        ctk.CTkLabel(parent, text="Действие:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(0, 5))
 
         self.action_var = tk.StringVar(value="all")
 
@@ -254,7 +254,7 @@ class FirewallDialog:
         ctk.CTkFrame(parent, height=2, fg_color="gray").pack(fill=tk.X, padx=10, pady=15)
 
         # Протокол
-        ctk.CTkLabel(parent, text="Протокол:", font=("Arial", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(0, 5))
+        ctk.CTkLabel(parent, text="Протокол:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(0, 5))
 
         self.protocol_var = tk.StringVar(value="all")
 
@@ -347,7 +347,7 @@ class FirewallDialog:
         self.context_menu.add_command(label="⬇ Вниз", command=self.move_rule_down)
 
         # Статус
-        self.rules_status = ctk.CTkLabel(parent, text="", font=("Arial", 11))
+        self.rules_status = ctk.CTkLabel(parent, text="", font=("Segoe UI", 11))
         self.rules_status.pack(anchor=tk.W, padx=10, pady=(0, 5))
 
     def on_right_click(self, event):
@@ -560,10 +560,10 @@ class FirewallRuleDialog:
         title_frame.pack(fill=tk.X, pady=(0, 15))
 
         ctk.CTkLabel(title_frame, text="📋" if not self.rule else "✏",
-                      font=("Arial", 28), text_color=primary).pack(side=tk.LEFT, padx=(0, 10))
+                      font=("Segoe UI", 28), text_color=primary).pack(side=tk.LEFT, padx=(0, 10))
         ctk.CTkLabel(title_frame,
                       text="Создание правила" if not self.rule else f"Редактирование: {self.rule.name}",
-                      font=("Arial", 18, "bold"), text_color=text_primary).pack(side=tk.LEFT)
+                      font=("Segoe UI", 18, "bold"), text_color=text_primary).pack(side=tk.LEFT)
 
         def section(header_text: str, subtitle: str = "") -> ctk.CTkFrame:
             """Создаёт секцию-card с акцентной полоской и заголовком."""
@@ -573,10 +573,10 @@ class FirewallRuleDialog:
             # Синяя полоска убрана по запросу пользователя
             header = ctk.CTkFrame(frame, fg_color="transparent")
             header.pack(fill=tk.X, padx=16, pady=(10, 4))
-            ctk.CTkLabel(header, text=header_text, font=("Arial", 14, "bold"),
+            ctk.CTkLabel(header, text=header_text, font=("Segoe UI", 14, "bold"),
                           text_color=text_primary, anchor="w").pack(side=tk.LEFT)
             if subtitle:
-                ctk.CTkLabel(header, text=subtitle, font=("Arial", 10),
+                ctk.CTkLabel(header, text=subtitle, font=("Segoe UI", 10),
                               text_color=text_muted, anchor="w").pack(side=tk.LEFT, padx=(12, 0))
             return frame
 
@@ -644,7 +644,7 @@ class FirewallRuleDialog:
         self.local_port_var = tk.StringVar(value=self.rule.local_ports if self.rule else "")
         ctk.CTkEntry(local_row, textvariable=self.local_port_var, width=150, placeholder_text="80,443").pack(
             side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(local_row, text="(номер или список)", font=("Arial", 10),
+        ctk.CTkLabel(local_row, text="(номер или список)", font=("Segoe UI", 10),
                       text_color=text_muted).pack(side=tk.LEFT)
 
         # Удаленный порт
@@ -656,7 +656,7 @@ class FirewallRuleDialog:
         self.remote_port_var = tk.StringVar(value=self.rule.remote_ports if self.rule else "")
         ctk.CTkEntry(remote_row, textvariable=self.remote_port_var, width=150, placeholder_text="80,443").pack(
             side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Arial", 10),
+        ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Segoe UI", 10),
                       text_color=text_muted).pack(side=tk.LEFT)
 
         # Удаленная сеть
@@ -669,7 +669,7 @@ class FirewallRuleDialog:
         self.remote_network_var = tk.StringVar(value=initial_value)
         ctk.CTkEntry(remote_net_frame, textvariable=self.remote_network_var, width=200,
                      placeholder_text="192.168.1.0/24").pack(side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_net_frame, text="(формат: IP/маска)", font=("Arial", 10),
+        ctk.CTkLabel(remote_net_frame, text="(формат: IP/маска)", font=("Segoe UI", 10),
                       text_color=text_muted).pack(side=tk.LEFT)
 
         # Тестовые данные
@@ -680,7 +680,7 @@ class FirewallRuleDialog:
             test_frame, text="🧪 Заполнить тестовыми данными",
             command=self.fill_test_data, height=34, corner_radius=8,
             fg_color=theme.color("accent"), hover_color=theme.color("accent_hover"),
-            font=("Arial", 12)
+            font=("Segoe UI", 12)
         ).pack(side=tk.RIGHT)
 
         # Кнопки
@@ -690,13 +690,13 @@ class FirewallRuleDialog:
         ctk.CTkButton(
             btn_frame, text="✕ Отмена", command=self.dialog.destroy,
             width=120, height=38, corner_radius=8,
-            fg_color=danger, hover_color=danger_hover, font=("Arial", 13)
+            fg_color=danger, hover_color=danger_hover, font=("Segoe UI", 13)
         ).pack(side=tk.LEFT, padx=5)
         ctk.CTkButton(
             btn_frame, text="💾 Сохранить правило", command=self.save_rule,
             width=180, height=38, corner_radius=8,
             fg_color=primary, hover_color=primary_hover,
-            font=("Arial", 13, "bold")
+            font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=5)
 
     def fill_test_data(self):

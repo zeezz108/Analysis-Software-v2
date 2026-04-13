@@ -69,14 +69,14 @@ class LinkPortSelectionDialog:
         title_label = ctk.CTkLabel(
             main_frame,
             text=f"Соединение: {self.node_a.name}  ↔  {self.node_b.name}",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         )
         title_label.pack(pady=(0, 10))
 
         # Информация о типах узлов
         info_text = f"Тип A: {self.get_node_type_russian(self.node_a.type)} | "
         info_text += f"Тип B: {self.get_node_type_russian(self.node_b.type)}"
-        ctk.CTkLabel(main_frame, text=info_text, font=("Arial", 12)).pack(pady=(0, 15))
+        ctk.CTkLabel(main_frame, text=info_text, font=("Segoe UI", 12)).pack(pady=(0, 15))
 
         # Фрейм для выбора типа соединения
         type_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
@@ -84,7 +84,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             type_frame, text="Тип соединения:",
-            font=("Arial", 13, "bold")
+            font=("Segoe UI", 13, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
         self.connection_type = tk.StringVar(value="ethernet")
@@ -120,7 +120,7 @@ class LinkPortSelectionDialog:
             wifi_radio.configure(state="disabled")
             ctk.CTkLabel(
                 types_row, text="(недоступно - нет подходящих портов)",
-                font=("Arial", 10), text_color="gray"
+                font=("Segoe UI", 10), text_color="gray"
             ).pack(side=tk.LEFT)
 
         # Фрейм для выбора портов
@@ -136,12 +136,12 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             info_frame, text="ℹ️ Информация о соединении",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(5, 2))
 
         self.connection_info = ctk.CTkLabel(
             info_frame, text="Выберите порты для соединения",
-            font=("Arial", 11), text_color="gray"
+            font=("Segoe UI", 11), text_color="gray"
         )
         self.connection_info.pack(anchor=tk.W, padx=10, pady=(0, 5))
 
@@ -152,13 +152,13 @@ class LinkPortSelectionDialog:
         ctk.CTkButton(
             button_frame, text="✓ Создать соединение",
             command=self.create_link, fg_color="#4CAF50",
-            height=38, font=("Arial", 13, "bold")
+            height=38, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=5)
 
         ctk.CTkButton(
             button_frame, text="✕ Отмена",
             command=self.dialog.destroy, fg_color="#CD3333",
-            height=38, font=("Arial", 13)
+            height=38, font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT, padx=5)
 
     def can_create_wifi_connection(self) -> bool:
@@ -208,7 +208,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             left_frame, text=f"Порты узла A: {self.node_a.name}",
-            font=("Arial", 14, "bold")
+            font=("Segoe UI", 14, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
         # Правый узел (B)
@@ -217,7 +217,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             right_frame, text=f"Порты узла B: {self.node_b.name}",
-            font=("Arial", 14, "bold")
+            font=("Segoe UI", 14, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
         # Переменные для выбранных портов
@@ -242,7 +242,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             left_frame, text=f"📌 PON порты узла A: {self.node_a.name}",
-            font=("Arial", 14, "bold")
+            font=("Segoe UI", 14, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
         right_frame = ctk.CTkFrame(ports_row)
@@ -250,7 +250,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             right_frame, text=f"📌 PON порты узла B: {self.node_b.name}",
-            font=("Arial", 14, "bold")
+            font=("Segoe UI", 14, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 5))
 
         self.port_a_var = tk.StringVar()
@@ -290,13 +290,13 @@ class LinkPortSelectionDialog:
 
             ctk.CTkLabel(
                 no_wifi_frame, text="❌ Нет доступных Wi-Fi портов с подходящими ролями",
-                font=("Arial", 16, "bold"), text_color="red"
+                font=("Segoe UI", 16, "bold"), text_color="red"
             ).pack(expand=True)
 
             ctk.CTkLabel(
                 no_wifi_frame,
                 text="Требуется: один узел с портом AP, другой с портом Client",
-                font=("Arial", 12), text_color="gray"
+                font=("Segoe UI", 12), text_color="gray"
             ).pack(expand=True, pady=(5, 0))
             return
 
@@ -305,7 +305,7 @@ class LinkPortSelectionDialog:
 
         ctk.CTkLabel(
             config_frame, text="📶 Доступные Wi-Fi соединения",
-            font=("Arial", 14, "bold")
+            font=("Segoe UI", 14, "bold")
         ).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         self.wifi_config_var = tk.StringVar()
@@ -321,7 +321,7 @@ class LinkPortSelectionDialog:
             rb = ctk.CTkRadioButton(
                 config_frame, text=text, variable=self.wifi_config_var,
                 value=value, command=self.update_connection_info,
-                font=("Arial", 12)
+                font=("Segoe UI", 12)
             )
             rb.pack(anchor=tk.W, padx=20, pady=5)
 
@@ -344,7 +344,7 @@ class LinkPortSelectionDialog:
                 text="🌐 Автоматическое подключение (порт будет создан)",
                 variable=var,
                 value="__auto__",
-                font=("Arial", 11)
+                font=("Segoe UI", 11)
             )
             rb.pack(anchor=tk.W, padx=5, pady=2)
             # Выбираем автоматически, чтобы пользователь ничего не искал
@@ -377,7 +377,7 @@ class LinkPortSelectionDialog:
             rb = ctk.CTkRadioButton(
                 port_frame, text=port_info, variable=var,
                 value=port["port_id"], state="normal" if not is_busy else "disabled",
-                font=("Arial", 11)
+                font=("Segoe UI", 11)
             )
             rb.pack(anchor=tk.W, padx=5, pady=2)
 

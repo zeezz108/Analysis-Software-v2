@@ -77,18 +77,18 @@ class SecurityPassportDialog:
         ctk.CTkLabel(
             content_frame,
             text="Загрузка паспорта безопасности...",
-            font=("Arial", 22, "bold")
+            font=("Segoe UI", 22, "bold")
         ).pack(pady=(0, 30))
 
         self.animation_label = ctk.CTkLabel(
             content_frame, text="🔍",
-            font=("Arial", 72, "bold"), text_color="#1E88E5"
+            font=("Segoe UI", 72, "bold"), text_color="#1E88E5"
         )
         self.animation_label.pack(pady=20)
 
         self.status_label = ctk.CTkLabel(
             content_frame, text="Анализ компонентов узла...",
-            font=("Arial", 14), text_color="gray"
+            font=("Segoe UI", 14), text_color="gray"
         )
         self.status_label.pack(pady=(0, 20))
 
@@ -217,10 +217,24 @@ class SecurityPassportDialog:
             cpe_info = extract_cpe_components(component_name)
 
             if cpe_info.get('vendor'):
+                product = cpe_info.get('product') or ""
+                version = cpe_info.get('version') or ""
                 cve_list = self.db.get_cves_for_component(
                     vendor=cpe_info['vendor'],
-                    product=cpe_info.get('product') or ""
+                    product=product,
+                    version=version
                 )
+                # Fallback 1: с version нет результатов → без version
+                if not cve_list and version:
+                    cve_list = self.db.get_cves_for_component(
+                        vendor=cpe_info['vendor'],
+                        product=product
+                    )
+                # Fallback 2: product не найден → только vendor
+                if not cve_list and product:
+                    cve_list = self.db.get_cves_for_component(
+                        vendor=cpe_info['vendor']
+                    )
                 all_cves.extend(cve_list)
 
             # Убираем дубликаты по cve_id
@@ -252,51 +266,100 @@ class SecurityPassportDialog:
             comp_cache.pop(k, None)
 
     def build_dynamic_passport(self, components: Dict) -> List[Dict]:
-        """Строит динамический паспорт безопасности."""
+        """Строит паспорт безопасности по модели ЭМВОС.
+
+        Использует NodeDecomposition для генерации всех разделов
+        с правильными индексами и порядком по эталону.
+        """
+        from models.osi_decomposition import NodeDecomposition, OSILevel
+
+        decomp = NodeDecomposition(self.node)
+        os_label = components.get("os", "") or ""
+
+        # Порядок разделов по эталону паспорта
+        SECTIONS = [
+            (OSILevel.PHYSICAL,     "Физический уровень ЭМВОС"),
+            (OSILevel.DATA_LINK,    "Канальный уровень ЭМВОС"),
+            (OSILevel.NETWORK,      "Сетевой уровень ЭМВОС"),
+            (OSILevel.TRANSPORT,    "Транспортный уровень ЭМВОС"),
+            (OSILevel.KERNEL,       "Подсистемы ядра ОС"),
+            (OSILevel.SESSION,      "Сеансовый уровень ЭМВОС"),
+            (OSILevel.PRESENTATION, "Уровень представления ЭМВОС"),
+            (OSILevel.APPLICATION,  "Прикладной уровень ЭМВОС"),
+            (OSILevel.HARDWARE,     "Аппаратный уровень"),
+            (OSILevel.USER,         "Пользовательский уровень"),
+        ]
+
+        # MAC/IP для обогащения портов физического уровня
+        port_info_map = {}
+        for port in self.node.ports:
+            name = port.get("name", "")
+            parts = []
+            if port.get("mac_address"):
+                parts.append(f"MAC: {port['mac_address']}")
+            if port.get("ip_address"):
+                mask = port.get("subnet_mask", "")
+                parts.append(f"IP: {port['ip_address']}/{mask}")
+            if parts:
+                port_info_map[name] = "; ".join(parts)
+
         passport_data = []
 
-        # ===== 1. Аппаратный уровень (порты) =====
-        if components["ports"]:
-            ports_items = []
-            for i, port in enumerate(components["ports"], 1):
-                port_type = port["type"]
+        for level, title in SECTIONS:
+            comps = decomp.get_components_by_level(level)
+            if not comps:
+                continue
 
-                if port_type == "ethernet":
-                    identifier = f"*f*~1.1.{i}~/а~14.{i}~"
-                    comp_type = "Порт 802.3/разъем RJ-45"
-                    comp_name = "cat.5e TWT TWT--PL45--8P8C--5E"
-                elif port_type == "pon":
-                    identifier = f"*f*~1.2.{i}~/а~15.{i}~"
-                    comp_type = "Порт/разъем RJ-11"
-                    comp_name = "6P2C"
-                elif port_type == "wifi":
-                    identifier = f"*f*~1.3.{i}~/а~16.{i}~"
-                    comp_type = "Порт 802.11/разъем 'антенна' Wi-Fi"
-                    comp_name = "Wi-Fi 6E"
+            section_items = []
+            for comp in comps:
+                # --- Колонка «Наименование объекта» ---
+                obj_name = comp.name
+
+                # --- Колонка «Спецификация» ---
+                # --- Ключ для поиска CVE ---
+                if comp.component_type == "interface":
+                    # Порт: спецификация = MAC/IP
+                    port_name = comp.name.split("(")[0].replace("Порт ", "").strip()
+                    spec = port_info_map.get(port_name, comp.description)
+                    search_key = comp.name
+                elif comp.component_type == "protocol":
+                    spec = f"{comp.name} для {os_label}" if os_label else comp.name
+                    search_key = comp.name
+                elif comp.component_type == "subsystem":
+                    spec = f"{comp.description} для {os_label}" if os_label else comp.description
+                    search_key = comp.name
+                elif comp.component_type in ("hardware", "software", "peripheral"):
+                    # Разделяем «Процессор: Intel i7» → obj=Процессор, spec=Intel i7
+                    if ":" in comp.name:
+                        prefix, model = comp.name.split(":", 1)
+                        obj_name = prefix.strip()
+                        spec = model.strip()
+                        search_key = model.strip()
+                    else:
+                        spec = comp.name
+                        search_key = comp.name
                 else:
-                    continue
+                    spec = comp.description or comp.name
+                    search_key = comp.name
 
-                spec_parts = []
-                if port["mac"]:
-                    spec_parts.append(f"MAC: {port['mac']}")
-                if port["ip"]:
-                    spec_parts.append(f"IP: {port['ip']}/{port['mask']}")
-                spec = "; ".join(spec_parts)
+                # CVE ищем только для реальных продуктов (hardware/software/peripheral)
+                if comp.component_type in ("hardware", "software", "peripheral"):
+                    all_cves = self.get_all_cves_for_component(search_key)
+                else:
+                    all_cves = []
 
-                all_cves = self.get_all_cves_for_component(port_type)
-
-                ports_items.append({
+                section_items.append({
                     "is_header": True,
-                    "identifier": identifier,
-                    "component_type": comp_type,
-                    "component_name": comp_name,
-                    "spec": spec,
+                    "identifier": comp.identifier,
+                    "component_type": obj_name,
+                    "component_name": spec,
+                    "spec": "",
                     "cves_count": len(all_cves)
                 })
 
                 if all_cves:
                     for cve_data in all_cves:
-                        ports_items.append({
+                        section_items.append({
                             "is_header": False,
                             "cwe": cve_data.get('cwe_id', '--'),
                             "cve": cve_data.get('cve_id', '--'),
@@ -305,211 +368,15 @@ class SecurityPassportDialog:
                             "cvss_v4": cve_data.get('cvss_v4', '--')
                         })
                 else:
-                    ports_items.append({
+                    section_items.append({
                         "is_header": False, "cwe": "--", "cve": "--",
                         "cvss_v2": "--", "cvss_v3": "--", "cvss_v4": "--"
                     })
 
-            if components["has_usb"]:
-                usb_ports = [p for p in components["ports"] if p["type"] == "usb"]
-                for i, port in enumerate(usb_ports, 1):
-                    identifier = f"*f*~12.{i}~/а~19.{i}~"
-                    all_cves = self.get_all_cves_for_component("USB")
-
-                    ports_items.append({
-                        "is_header": True, "identifier": identifier,
-                        "component_type": "Порт/разъем USB",
-                        "component_name": "USB 2.0 High-speed",
-                        "spec": "", "cves_count": len(all_cves)
-                    })
-
-                    if all_cves:
-                        for cve_data in all_cves:
-                            ports_items.append({
-                                "is_header": False,
-                                "cwe": cve_data.get('cwe_id', 'CWE--787'),
-                                "cve": cve_data.get('cve_id', 'CVE--2022--2964'),
-                                "cvss_v2": cve_data.get('cvss_v2', '--'),
-                                "cvss_v3": cve_data.get('cvss_v3', '7.8'),
-                                "cvss_v4": cve_data.get('cvss_v4', '--')
-                            })
-                    else:
-                        ports_items.append({
-                            "is_header": False, "cwe": "CWE--787", "cve": "CVE--2022--2964",
-                            "cvss_v2": "--", "cvss_v3": "7.8", "cvss_v4": "--"
-                        })
-
-            if ports_items:
+            if section_items:
                 passport_data.append({
-                    "title": "Аппаратный уровень (точки входа)",
-                    "items": ports_items
-                })
-
-        # ===== 2. Аппаратные компоненты =====
-        if components["hardware"]:
-            hardware_items = []
-            for item in components["hardware"]:
-                if ":" in item:
-                    comp_type, comp_name = item.split(":", 1)
-                    comp_type = comp_type.strip()
-                    comp_name = comp_name.strip()
-                else:
-                    comp_type = "Компонент"
-                    comp_name = item
-
-                if "Процессор" in comp_type:
-                    identifier = "*а~1.m~"
-                elif "Видеоконтроллер" in comp_type or "Видеокарта" in comp_type:
-                    identifier = "*а~4.m~"
-                elif "Материнская плата" in comp_type:
-                    identifier = "*а~2.m~"
-                elif "HDD" in comp_type or "SSD" in comp_type:
-                    identifier = "*а~8.m~"
-                elif "Память" in comp_type or "RAM" in comp_type:
-                    identifier = "*а~7.m~"
-                else:
-                    identifier = "*а~?.m~"
-
-                all_cves = self.get_all_cves_for_component(comp_name)
-
-                hardware_items.append({
-                    "is_header": True, "identifier": identifier,
-                    "component_type": comp_type, "component_name": comp_name,
-                    "spec": "", "cves_count": len(all_cves)
-                })
-
-                if all_cves:
-                    for cve_data in all_cves:
-                        hardware_items.append({
-                            "is_header": False,
-                            "cwe": cve_data.get('cwe_id', '--'),
-                            "cve": cve_data.get('cve_id', '--'),
-                            "cvss_v2": cve_data.get('cvss_v2', '--'),
-                            "cvss_v3": cve_data.get('cvss_v3', '--'),
-                            "cvss_v4": cve_data.get('cvss_v4', '--')
-                        })
-                else:
-                    hardware_items.append({
-                        "is_header": False, "cwe": "--", "cve": "--",
-                        "cvss_v2": "--", "cvss_v3": "--", "cvss_v4": "--"
-                    })
-
-            if hardware_items:
-                passport_data.append({
-                    "title": "Аппаратный уровень (компоненты)",
-                    "items": hardware_items
-                })
-
-        # ===== 3. Прикладной уровень =====
-        if components["software"]:
-            app_items = []
-            for item in components["software"]:
-                if ":" in item:
-                    comp_type, comp_name = item.split(":", 1)
-                    comp_type = comp_type.strip()
-                    comp_name = comp_name.strip()
-                else:
-                    comp_type = "Прикладное ПО"
-                    comp_name = item
-
-                all_cves = self.get_all_cves_for_component(comp_name)
-
-                app_items.append({
-                    "is_header": True, "identifier": f"*q*~{comp_type}~",
-                    "component_type": comp_type, "component_name": comp_name,
-                    "spec": "", "cves_count": len(all_cves)
-                })
-
-                if all_cves:
-                    for cve_data in all_cves:
-                        app_items.append({
-                            "is_header": False,
-                            "cwe": cve_data.get('cwe_id', '--'),
-                            "cve": cve_data.get('cve_id', '--'),
-                            "cvss_v2": cve_data.get('cvss_v2', '--'),
-                            "cvss_v3": cve_data.get('cvss_v3', '--'),
-                            "cvss_v4": cve_data.get('cvss_v4', '--')
-                        })
-                else:
-                    app_items.append({
-                        "is_header": False, "cwe": "--", "cve": "--",
-                        "cvss_v2": "--", "cvss_v3": "--", "cvss_v4": "--"
-                    })
-
-            if app_items:
-                passport_data.append({
-                    "title": "Прикладной уровень",
-                    "items": app_items
-                })
-
-        # ===== 4. Периферия =====
-        if components["peripherals"]:
-            peripheral_items = []
-
-            # Определяем тип периферии по ключевым словам
-            def detect_peripheral_type(text: str) -> str:
-                text_lower = text.lower()
-                if any(k in text_lower for k in ["мышь", "mouse", "bloody", "zowie"]):
-                    return "Мышь"
-                elif any(k in text_lower for k in ["клавиатур", "keyboard", "key pad"]):
-                    return "Клавиатура"
-                elif any(k in text_lower for k in ["принтер", "printer", "мфу"]):
-                    return "Принтер"
-                elif any(k in text_lower for k in ["монитор", "monitor", "display", "экран", "дисплей", "lcd", "led"]):
-                    return "Монитор"
-                return "Периферийное устройство"
-
-            # Идентификаторы для периферии
-            peripheral_id_map = {
-                "Мышь": "*p*~мш~",
-                "Клавиатура": "*p*~кл~",
-                "Принтер": "*p*~пр~",
-                "Монитор": "*p*~мн~",
-                "Периферийное устройство": "*p*~пу~"
-            }
-
-            for item in components["peripherals"]:
-                if ":" in item:
-                    comp_type, comp_name = item.split(":", 1)
-                    comp_type = comp_type.strip()
-                    comp_name = comp_name.strip()
-                else:
-                    comp_type = detect_peripheral_type(item)
-                    comp_name = item
-
-                # Если тип общий, уточняем по содержимому
-                if comp_type in ("Периферия", "Компонент"):
-                    comp_type = detect_peripheral_type(comp_name)
-
-                identifier = peripheral_id_map.get(comp_type, "*p*~пу~")
-                all_cves = self.get_all_cves_for_component(comp_name)
-
-                peripheral_items.append({
-                    "is_header": True, "identifier": identifier,
-                    "component_type": comp_type, "component_name": comp_name,
-                    "spec": "", "cves_count": len(all_cves)
-                })
-
-                if all_cves:
-                    for cve_data in all_cves:
-                        peripheral_items.append({
-                            "is_header": False,
-                            "cwe": cve_data.get('cwe_id', '--'),
-                            "cve": cve_data.get('cve_id', '--'),
-                            "cvss_v2": cve_data.get('cvss_v2', '--'),
-                            "cvss_v3": cve_data.get('cvss_v3', '--'),
-                            "cvss_v4": cve_data.get('cvss_v4', '--')
-                        })
-                else:
-                    peripheral_items.append({
-                        "is_header": False, "cwe": "--", "cve": "--",
-                        "cvss_v2": "--", "cvss_v3": "--", "cvss_v4": "--"
-                    })
-
-            if peripheral_items:
-                passport_data.append({
-                    "title": "Пользовательский уровень",
-                    "items": peripheral_items
+                    "title": title,
+                    "items": section_items
                 })
 
         return passport_data
@@ -539,13 +406,23 @@ class SecurityPassportDialog:
                         if not item.get("is_header") and item.get('cve', '--') != '--':
                             total_vulnerabilities += 1
 
-                self.dialog.after(0, lambda: self.progress.set(0.9))
-                self.dialog.after(0, lambda: self.status_label.configure(text="Формирование отчета..."))
+                def _safe_after(func):
+                    try:
+                        if self.dialog.winfo_exists():
+                            self.dialog.after(0, func)
+                    except Exception:
+                        pass
 
-                self.dialog.after(0, lambda: self.finish_loading(total_vulnerabilities, passport_data))
+                _safe_after(lambda: self.progress.set(0.9))
+                _safe_after(lambda: self.status_label.configure(text="Формирование отчета..."))
+                _safe_after(lambda: self.finish_loading(total_vulnerabilities, passport_data))
 
             except Exception as e:
-                self.dialog.after(0, lambda: self.show_load_error(str(e)))
+                try:
+                    if self.dialog.winfo_exists():
+                        self.dialog.after(0, lambda: self.show_load_error(str(e)))
+                except Exception:
+                    pass
 
         thread = threading.Thread(target=load_thread, daemon=True)
         thread.start()
@@ -590,15 +467,15 @@ class SecurityPassportDialog:
         title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
         title_frame.pack(fill=tk.X, pady=(0, 20))
 
-        ctk.CTkLabel(title_frame, text="📋", font=("Arial", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkLabel(title_frame, text="📋", font=("Segoe UI", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
 
         header_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
         header_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        ctk.CTkLabel(header_frame, text="Паспорт безопасности", font=("Arial", 22, "bold")).pack(anchor=tk.W)
+        ctk.CTkLabel(header_frame, text="Паспорт безопасности", font=("Segoe UI", 22, "bold")).pack(anchor=tk.W)
         ctk.CTkLabel(
             header_frame, text=f"{self.node.name} • {self.get_node_type_russian(self.node.type)}",
-            font=("Arial", 13), text_color="gray"
+            font=("Segoe UI", 13), text_color="gray"
         ).pack(anchor=tk.W)
 
         # Таблица
@@ -608,12 +485,12 @@ class SecurityPassportDialog:
         table_header = ctk.CTkFrame(table_card, fg_color="transparent")
         table_header.pack(fill=tk.X, padx=15, pady=(10, 5))
 
-        ctk.CTkLabel(table_header, text="🔍 Найденные уязвимости", font=("Arial", 15, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(table_header, text="🔍 Найденные уязвимости", font=("Segoe UI", 15, "bold")).pack(side=tk.LEFT)
 
-        self.count_label = ctk.CTkLabel(table_header, text="", font=("Arial", 13), text_color="gray")
+        self.count_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 13), text_color="gray")
         self.count_label.pack(side=tk.LEFT, padx=(10, 0))
 
-        self.status_label = ctk.CTkLabel(table_header, text="", font=("Arial", 12), text_color="gray")
+        self.status_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 12), text_color="gray")
         self.status_label.pack(side=tk.RIGHT)
 
         table_container = ctk.CTkFrame(table_card)
@@ -647,9 +524,9 @@ class SecurityPassportDialog:
         style.theme_use("clam")
 
         style.configure("Treeview", background="white", foreground="black",
-                        fieldbackground="white", font=('Arial', 10), rowheight=28)
+                        fieldbackground="white", font=('Segoe UI', 10), rowheight=28)
         style.configure("Treeview.Heading", background="#d9d9d9", foreground="black",
-                        font=('Arial', 10, 'bold'), height=30)
+                        font=('Segoe UI', 10, 'bold'), height=30)
 
         columns = ("Идентификатор", "Наименование объекта", "Спецификация",
                    "CWE", "CVE", "CVSS V2", "CVSS V3", "CVSS V4")
@@ -679,8 +556,8 @@ class SecurityPassportDialog:
         parent.grid_rowconfigure(0, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
-        self.tree.tag_configure('section_header', background='#e0e0e0', font=('Arial', 10, 'bold'))
-        self.tree.tag_configure('component_header', background='#f5f5f5', font=('Arial', 10, 'bold'))
+        self.tree.tag_configure('section_header', background='#e0e0e0', font=('Segoe UI', 10, 'bold'))
+        self.tree.tag_configure('component_header', background='#f5f5f5', font=('Segoe UI', 10, 'bold'))
 
     def populate_table(self, passport_data: List[Dict], total_vulnerabilities: int):
         """Заполняет таблицу данными."""
@@ -731,7 +608,7 @@ class SecurityPassportDialog:
         - Сводка (тип узла, число уязвимостей)
         - Таблица: повторяет табличное представление на экране,
           включая строки-заголовки секций и компонентов.
-        - Поддержка кириллицы через шрифт DejaVuSans / Arial, который
+        - Поддержка кириллицы через шрифт DejaVuSans / Segoe UI, который
           регистрируется в pdfmetrics. Если системный шрифт не найден,
           используется встроенный Helvetica (кириллица может не отрисоваться).
         """
@@ -786,8 +663,8 @@ class SecurityPassportDialog:
         candidates = [
             ("DejaVuSans", "DejaVuSans.ttf"),
             ("DejaVuSans", "DejaVuSans-Bold.ttf"),
-            ("ArialTT", r"C:\Windows\Fonts\arial.ttf"),
-            ("ArialTT-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
+            ("Segoe UITT", r"C:\Windows\Fonts\arial.ttf"),
+            ("Segoe UITT-Bold", r"C:\Windows\Fonts\arialbd.ttf"),
         ]
         registered = {}
         for name, path in candidates:
@@ -798,9 +675,9 @@ class SecurityPassportDialog:
                 except Exception:
                     pass
 
-        if "ArialTT" in registered:
-            font_name = "ArialTT"
-            font_bold = "ArialTT-Bold" if "ArialTT-Bold" in registered else "ArialTT"
+        if "Segoe UITT" in registered:
+            font_name = "Segoe UITT"
+            font_bold = "Segoe UITT-Bold" if "Segoe UITT-Bold" in registered else "Segoe UITT"
         elif "DejaVuSans" in registered:
             font_name = "DejaVuSans"
             font_bold = "DejaVuSans"

@@ -185,6 +185,19 @@ class NodeDecomposition:
                 description="Стандарт Wi-Fi"
             ))
 
+        # Bluetooth и WiMAX — всегда присутствуют при наличии сетевых портов
+        if port_types_seen:
+            self.components[level].append(OSIComponent(
+                name="IEEE 802.15", level=level,
+                component_type="protocol", identifier="f2.3",
+                description="Стандарт Bluetooth"
+            ))
+            self.components[level].append(OSIComponent(
+                name="IEEE 802.16", level=level,
+                component_type="protocol", identifier="f2.4",
+                description="Стандарт WiMAX"
+            ))
+
     # ----- Канальный уровень -----
 
     def _decompose_data_link(self):
@@ -243,8 +256,8 @@ class NodeDecomposition:
             return
 
         for proto_name, ident, desc in [
-            ("TCP", "t1", "Transmission Control Protocol"),
-            ("UDP", "t2", "User Datagram Protocol"),
+            ("TCP", "t1.1", "Transmission Control Protocol"),
+            ("UDP", "t2.1", "User Datagram Protocol"),
             ("SCTP", "t3", "Stream Control Transmission Protocol"),
         ]:
             self.components[level].append(OSIComponent(
@@ -296,6 +309,7 @@ class NodeDecomposition:
         for name, ident, desc in [
             ("SSL/TLS", "r7", "Шифрование транспорта"),
             ("ASCII", "r2", "Кодировка текста"),
+            ("ICA", "r3", "Independent Computing Architecture"),
             ("HTTPКД", "r8", "HTTP кодирование данных"),
         ]:
             self.components[level].append(OSIComponent(
@@ -327,10 +341,15 @@ class NodeDecomposition:
         # Клиентские протоколы (для АРМ, Ноутбук)
         if self.node.type in ("ARM", "Laptop"):
             clients = [
-                ("HTTPппо-клиент", "q9", "HTTP прикладное ПО"),
-                ("SSH-клиент", "q2", "Secure Shell"),
                 ("FTP-клиент", "q1", "File Transfer Protocol"),
+                ("SSH-клиент", "q2", "Secure Shell"),
                 ("RDP-клиент", "q3", "Remote Desktop Protocol"),
+                ("SMTP-клиент", "q4", "Simple Mail Transfer Protocol"),
+                ("IMAP-клиент", "q5", "Internet Message Access Protocol"),
+                ("POP3-клиент", "q6", "Post Office Protocol v3"),
+                ("SIP-клиент", "q7", "Session Initiation Protocol"),
+                ("SNMP-клиент", "q8", "Simple Network Management Protocol"),
+                ("HTTPппо-клиент", "q9", "HTTP прикладное ПО"),
             ]
             for name, ident, desc in clients:
                 self.components[level].append(OSIComponent(
@@ -417,14 +436,44 @@ class NodeDecomposition:
                 ("Блок питания", "a13", "Электропитание компонентов"),
                 ("BIOS/UEFI", "a6", "Базовая система ввода/вывода"),
                 ("PCI Express контроллеры", "a3", "Шина расширения"),
+                ("Аудиоконтроллер", "a5", "Звуковая подсистема"),
+                ("SATA контроллеры", "a9", "Интерфейс накопителей"),
                 ("USB контроллеры", "a11", "Контроллеры USB"),
                 ("RTC", "a10", "Часы реального времени"),
+                ("Сетевая карта", "a12", "Ethernet контроллер"),
             ]:
+
                 self.components[level].append(OSIComponent(
                     name=name, level=level,
                     component_type="hardware", identifier=ident,
                     description=desc
                 ))
+
+            # Разъёмы и модули — по портам узла (а14-а19)
+            port_types_seen = set()
+            for port in self.node.ports:
+                pt = port.get("port_type", "")
+                if pt == "ethernet" and "rj45" not in port_types_seen:
+                    port_types_seen.add("rj45")
+                    self.components[level].append(OSIComponent(
+                        name="Разъём RJ-45", level=level,
+                        component_type="hardware", identifier="a14",
+                        description="Ethernet разъём"
+                    ))
+                elif pt == "wifi" and "wifi" not in port_types_seen:
+                    port_types_seen.add("wifi")
+                    self.components[level].append(OSIComponent(
+                        name="Модуль Wi-Fi", level=level,
+                        component_type="hardware", identifier="a16",
+                        description="Беспроводной модуль IEEE 802.11"
+                    ))
+                elif pt == "usb" and "usb_port" not in port_types_seen:
+                    port_types_seen.add("usb_port")
+                    self.components[level].append(OSIComponent(
+                        name="Разъём USB", level=level,
+                        component_type="hardware", identifier="a19",
+                        description="Разъём USB"
+                    ))
 
     # ----- Ядро ОС -----
 
@@ -436,7 +485,13 @@ class NodeDecomposition:
             return  # У узла «Интернет» нет ОС
 
         subsystems = [
-            ("Подсистема драйверов устройств", "i", "Драйверы оборудования"),
+            ("Драйвер сетевой карты", "i1.1", "Ethernet / Wi-Fi драйвер"),
+            ("Драйвер видеоконтроллера", "i2", "GPU драйвер"),
+            ("Драйвер аудиоконтроллера", "i3", "Аудио драйвер"),
+            ("Драйвер USB", "i4", "USB драйвер"),
+            ("Драйвер клавиатуры", "i5", "HID клавиатуры"),
+            ("Драйвер мыши", "i6", "HID мыши"),
+            ("Драйвер СВВ", "i7", "Средства ввода/вывода"),
             ("Подсистема управления доступом", "w1", "DAC/MAC модели"),
             ("Подсистема управления файлами", "p1", "Файловые системы"),
             ("Подсистема управления процессами", "v1", "Планировщик и управление ОЗУ"),
@@ -474,35 +529,80 @@ class NodeDecomposition:
         if self.node.type == "Internet":
             return
 
-        # Из properties['software'] — периферия
+        # Из properties['software'] — периферия с конкретными h-индексами
+        _PERIPH_MAP = {
+            "Клавиатура:": ("h1", "Клавиатура"),
+            "Мышь:":       ("h2", "Манипуляторная мышь"),
+            "Принтер:":    ("h3", "МФУ / Принтер"),
+            "Монитор:":    ("h7", "Монитор"),
+        }
         for sw in self.node.properties.get("software", []):
             if sw and isinstance(sw, str):
-                for prefix in ("Мышь:", "Клавиатура:", "Принтер:", "Монитор:"):
+                for prefix, (ident, desc) in _PERIPH_MAP.items():
                     if sw.startswith(prefix):
                         self.components[level].append(OSIComponent(
                             name=sw, level=level,
                             component_type="peripheral",
-                            identifier="h",
-                            description="Периферийное устройство"
+                            identifier=ident,
+                            description=desc
                         ))
                         break
 
         # Пользовательский интерфейс
         self.components[level].append(OSIComponent(
             name="Пользовательский интерфейс", level=level,
-            component_type="software", identifier="ui",
-            description="Консоль управления"
+            component_type="software", identifier="h5",
+            description="Графический пульт управления"
         ))
 
     # ----- Поиск уязвимостей (вызывается отдельно, не из конструктора) -----
 
     def find_vulnerabilities(self):
-        """Ищет CVE для всех компонентов через cve_db.
+        """Ищет CVE для всех компонентов.
 
-        Для аппаратных компонентов (hardware) и ПО (software) —
-        извлекает vendor/product из имени и ищет в БД.
-        Для протоколов — ищет по имени протокола.
+        Сначала проверяет кеш паспорта безопасности узла
+        (node.properties["security_passport_cache"]).
+        Если кеша нет — делает SQL-запросы через cve_db.
         """
+        # --- Кеш паспорта: component_name → [cve_list] ---
+        passport_cache = (
+            self.node.properties
+            .get("security_passport_cache", {})
+            .get("components", {})
+        )
+
+        # Префиксы для перебора вариантов имени в кеше
+        _RU_PREFIXES = (
+            "Процессор: ", "Видеоконтроллер: ", "Материнская плата: ",
+            "HDD/SSD: ", "Память: ", "ОС: ", "Приложение: ",
+            "Мышь: ", "Клавиатура: ", "Принтер: ", "Монитор: ",
+        )
+
+        def _lookup_cache(name):
+            """Ищет CVE в кеше паспорта по имени компонента."""
+            # Полное имя
+            if name in passport_cache:
+                return passport_cache[name]
+            # Имя без русского префикса (кеш хранит часть после «:»)
+            for pfx in _RU_PREFIXES:
+                if name.startswith(pfx):
+                    short = name[len(pfx):]
+                    if short in passport_cache:
+                        return passport_cache[short]
+                    break
+            return None
+
+        # --- Если кеш есть, используем его ---
+        if passport_cache:
+            for level, comps in self.components.items():
+                for comp in comps:
+                    cached = _lookup_cache(comp.name)
+                    if cached:
+                        comp.cve_list = cached
+                        comp.has_vulnerability = bool(cached)
+            return
+
+        # --- Кеша нет: делаем SQL-запросы ---
         try:
             from database.cve_db import CVEDatabase
             db = CVEDatabase()
@@ -514,24 +614,28 @@ class NodeDecomposition:
         for level, comps in self.components.items():
             for comp in comps:
                 if comp.component_type in ("hardware", "software", "peripheral"):
-                    # Извлекаем vendor/product из названия
                     cpe = extract_cpe_components(comp.name)
                     vendor = cpe.get("vendor", "")
                     product = cpe.get("product", "")
+                    version = cpe.get("version", "")
+                    cves = None
                     if vendor:
-                        cves = db.get_cves_for_component(vendor, product)
-                        if cves:
-                            comp.cve_list = cves[:10]  # ограничиваем для скорости
-                            comp.has_vulnerability = True
-                            comp.cve_vendor = vendor
-                            comp.cve_product = product
+                        cves = db.get_cves_for_component(vendor, product, version)
+                        if not cves and version:
+                            cves = db.get_cves_for_component(vendor, product)
+                        if not cves and product:
+                            cves = db.get_cves_for_component(vendor)
+                    if cves:
+                        comp.cve_list = cves
+                        comp.has_vulnerability = True
+                        comp.cve_vendor = vendor
+                        comp.cve_product = product
                 elif comp.component_type == "protocol":
-                    # Для протоколов ищем по имени
                     proto_name = comp.name.lower().replace("-", "_").replace("/", "_")
                     if proto_name and len(proto_name) > 2:
                         cves = db.get_cves_by_cpe_mask(proto_name)
                         if cves:
-                            comp.cve_list = cves[:5]
+                            comp.cve_list = cves
                             comp.has_vulnerability = True
 
     # ----- Вспомогательные -----

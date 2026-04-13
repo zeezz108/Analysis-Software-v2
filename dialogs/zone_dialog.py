@@ -96,12 +96,12 @@ class ZoneCreationDialog:
         section_inner.pack(fill=tk.X, padx=20, pady=16)
 
         ctk.CTkLabel(section_inner, text="Основные сведения",
-                      font=("Arial", 15, "bold"), text_color=text_primary,
+                      font=("Segoe UI", 15, "bold"), text_color=text_primary,
                       anchor="w").pack(fill=tk.X, pady=(0, 12))
 
         # --- Тип зоны TIM: три карточки ---
         ctk.CTkLabel(section_inner, text="Тип зоны TIM:",
-                      font=("Arial", 12), text_color=text_secondary,
+                      font=("Segoe UI", 12), text_color=text_secondary,
                       anchor="w").pack(fill=tk.X, pady=(0, 8))
 
         cards_row = ctk.CTkFrame(section_inner, fg_color="transparent")
@@ -120,7 +120,7 @@ class ZoneCreationDialog:
 
         # --- Название зоны ---
         ctk.CTkLabel(section_inner, text="Название зоны:",
-                      font=("Arial", 12), text_color=text_secondary,
+                      font=("Segoe UI", 12), text_color=text_secondary,
                       anchor="w").pack(fill=tk.X, pady=(0, 4))
 
         self.name_var = tk.StringVar(value="")
@@ -133,7 +133,7 @@ class ZoneCreationDialog:
 
         # --- Описание зоны ---
         ctk.CTkLabel(section_inner, text="Описание зоны:",
-                      font=("Arial", 12), text_color=text_secondary,
+                      font=("Segoe UI", 12), text_color=text_secondary,
                       anchor="w").pack(fill=tk.X, pady=(0, 4))
 
         self.desc_var = tk.StringVar()
@@ -153,7 +153,7 @@ class ZoneCreationDialog:
             fg_color=success, hover_color=success_hover,
             text_color="#FFFFFF",
             width=130, height=40, corner_radius=10,
-            font=("Arial", 13, "bold")
+            font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
@@ -161,7 +161,7 @@ class ZoneCreationDialog:
             fg_color=danger, hover_color=danger_hover,
             text_color="#FFFFFF",
             width=110, height=40, corner_radius=10,
-            font=("Arial", 13)
+            font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT)
 
         self.dialog.bind("<Return>", lambda e: self.create_zone())
@@ -187,13 +187,13 @@ class ZoneCreationDialog:
             ctk.CTkLabel(inner, image=icon, text="").pack(pady=(0, 8))
         else:
             ctk.CTkLabel(inner, text=zone_type["icon_placeholder"],
-                          font=("Arial", 32)).pack(pady=(0, 8))
+                          font=("Segoe UI", 32)).pack(pady=(0, 8))
 
         ctk.CTkLabel(inner, text=zone_type["title"],
-                      font=("Arial", 12, "bold"),
+                      font=("Segoe UI", 12, "bold"),
                       text_color=color("text_primary")).pack()
         ctk.CTkLabel(inner, text=zone_type["subtitle"],
-                      font=("Arial", 10),
+                      font=("Segoe UI", 10),
                       text_color=color("text_muted"),
                       justify="center").pack(pady=(2, 0))
 

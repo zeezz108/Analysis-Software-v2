@@ -61,12 +61,12 @@ class VMManagementDialog:
 
         ctk.CTkLabel(
             info_frame, text=f"🔌 Физических портов: {self.server_node.physical_port_count}",
-            font=("Arial", 12)
+            font=("Segoe UI", 12)
         ).pack(side=tk.LEFT, padx=10, pady=5)
 
         ctk.CTkLabel(
             info_frame, text=f"🖥️ ВМ: {len(self.server_node.virtual_machines)}",
-            font=("Arial", 12)
+            font=("Segoe UI", 12)
         ).pack(side=tk.LEFT, padx=10, pady=5)
 
         # Панель кнопок
@@ -227,12 +227,12 @@ class VMCreationDialog:
         content_frame = ctk.CTkFrame(self.loading_frame, fg_color="transparent")
         content_frame.pack(expand=True)
 
-        ctk.CTkLabel(content_frame, text="Загрузка списков ОС и ПО...", font=("Arial", 18, "bold")).pack(pady=(0, 20))
+        ctk.CTkLabel(content_frame, text="Загрузка списков ОС и ПО...", font=("Segoe UI", 18, "bold")).pack(pady=(0, 20))
 
-        self.animation_label = ctk.CTkLabel(content_frame, text="⏳", font=("Arial", 48, "bold"), text_color="#2196F3")
+        self.animation_label = ctk.CTkLabel(content_frame, text="⏳", font=("Segoe UI", 48, "bold"), text_color="#2196F3")
         self.animation_label.pack(pady=20)
 
-        self.status_label = ctk.CTkLabel(content_frame, text="Подключение к базе данных CVE...", font=("Arial", 12),
+        self.status_label = ctk.CTkLabel(content_frame, text="Подключение к базе данных CVE...", font=("Segoe UI", 12),
                                          text_color="gray")
         self.status_label.pack(pady=(0, 20))
 
@@ -341,7 +341,7 @@ class VMCreationDialog:
         name_frame = ctk.CTkFrame(main_frame)
         name_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ctk.CTkLabel(name_frame, text="Имя виртуальной машины:", font=("Arial", 13, "bold")).pack(anchor=tk.W, padx=5,
+        ctk.CTkLabel(name_frame, text="Имя виртуальной машины:", font=("Segoe UI", 13, "bold")).pack(anchor=tk.W, padx=5,
                                                                                                   pady=(5, 0))
         self.name_var = tk.StringVar(value=self.vm.name if self.vm else "")
         ctk.CTkEntry(name_frame, textvariable=self.name_var, placeholder_text="Например: Web Server 01",
@@ -377,7 +377,7 @@ class VMCreationDialog:
         btn_frame.pack(fill=tk.X, pady=(10, 0))
 
         ctk.CTkButton(btn_frame, text="💾 Сохранить ВМ", command=self.save_vm, fg_color="#4CAF50", width=120, height=38,
-                      font=("Arial", 13, "bold")).pack(side=tk.RIGHT, padx=5)
+                      font=("Segoe UI", 13, "bold")).pack(side=tk.RIGHT, padx=5)
         ctk.CTkButton(btn_frame, text="✕ Отмена", command=self.dialog.destroy, fg_color="#CD3333", width=100,
                       height=38).pack(side=tk.RIGHT, padx=5)
 
@@ -388,7 +388,7 @@ class VMCreationDialog:
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text="Выберите операционную систему:", font=("Arial", 13, "bold")).pack(anchor=tk.W,
+        ctk.CTkLabel(frame, text="Выберите операционную систему:", font=("Segoe UI", 13, "bold")).pack(anchor=tk.W,
                                                                                                     pady=(0, 10))
 
         items = self.cached_data.get("all_os", [])
@@ -405,7 +405,7 @@ class VMCreationDialog:
         ctk.CTkEntry(search_frame, textvariable=search_var, placeholder_text="🔍 Поиск ОС...", height=32).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
 
-        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Arial", 10), text_color="gray")
+        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Segoe UI", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
         # Список
@@ -415,7 +415,7 @@ class VMCreationDialog:
         self.os_listbox = tk.Listbox(
             list_frame, bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "white",
             fg="white" if ctk.get_appearance_mode() == "Dark" else "black",
-            font=("Arial", 10), height=15, selectmode=tk.SINGLE
+            font=("Segoe UI", 10), height=15, selectmode=tk.SINGLE
         )
 
         scrollbar = ctk.CTkScrollbar(list_frame, command=self.os_listbox.yview)
@@ -459,7 +459,7 @@ class VMCreationDialog:
         selected_frame = ctk.CTkFrame(frame, fg_color="transparent")
         selected_frame.pack(fill=tk.X, pady=(10, 0))
 
-        ctk.CTkLabel(selected_frame, text="Выбрано:", font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(selected_frame, text="Выбрано:", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT, padx=(0, 5))
         selected_label = ctk.CTkLabel(selected_frame, text=self.vm.os if self.vm and self.vm.os else "не выбрано",
                                       text_color="green" if self.vm and self.vm.os else "gray")
         selected_label.pack(side=tk.LEFT)
@@ -477,7 +477,7 @@ class VMCreationDialog:
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text="Выберите прикладное ПО (можно несколько):", font=("Arial", 13, "bold")).pack(
+        ctk.CTkLabel(frame, text="Выберите прикладное ПО (можно несколько):", font=("Segoe UI", 13, "bold")).pack(
             anchor=tk.W, pady=(0, 10))
 
         items = self.cached_data.get("app_software", [])
@@ -492,7 +492,7 @@ class VMCreationDialog:
         left_frame = ctk.CTkFrame(frame)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        ctk.CTkLabel(left_frame, text="Доступные приложения:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+        ctk.CTkLabel(left_frame, text="Доступные приложения:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                 pady=(0, 5))
 
         search_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
@@ -503,7 +503,7 @@ class VMCreationDialog:
                                                                                                            fill=tk.X,
                                                                                                            expand=True)
 
-        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Arial", 10), text_color="gray")
+        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Segoe UI", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
         list_frame = ctk.CTkFrame(left_frame)
@@ -512,7 +512,7 @@ class VMCreationDialog:
         self.app_listbox = tk.Listbox(
             list_frame, bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "white",
             fg="white" if ctk.get_appearance_mode() == "Dark" else "black",
-            font=("Arial", 10), height=15, selectmode=tk.MULTIPLE
+            font=("Segoe UI", 10), height=15, selectmode=tk.MULTIPLE
         )
 
         scrollbar = ctk.CTkScrollbar(list_frame, command=self.app_listbox.yview)
@@ -527,13 +527,13 @@ class VMCreationDialog:
         right_frame = ctk.CTkFrame(frame)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        ctk.CTkLabel(right_frame, text="Выбранные приложения:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+        ctk.CTkLabel(right_frame, text="Выбранные приложения:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                  pady=(0, 5))
 
         self.selected_listbox = tk.Listbox(
             right_frame, bg="#2b2b2b" if ctk.get_appearance_mode() == "Dark" else "white",
             fg="white" if ctk.get_appearance_mode() == "Dark" else "black",
-            font=("Arial", 10), height=15
+            font=("Segoe UI", 10), height=15
         )
 
         scrollbar2 = ctk.CTkScrollbar(right_frame, command=self.selected_listbox.yview)
@@ -618,7 +618,7 @@ class VMCreationDialog:
         title_frame = ctk.CTkFrame(frame, fg_color="transparent")
         title_frame.pack(fill=tk.X, pady=(0, 10))
 
-        ctk.CTkLabel(title_frame, text="🌐 Сетевые интерфейсы", font=("Arial", 14, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(title_frame, text="🌐 Сетевые интерфейсы", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT)
         ctk.CTkButton(title_frame, text="➕ Добавить интерфейс", command=self.add_vm_port, width=150, height=32).pack(
             side=tk.RIGHT)
         ctk.CTkButton(title_frame, text="🧪 Тестовые данные", command=self.fill_test_data, width=130, height=32).pack(
@@ -644,7 +644,7 @@ class VMCreationDialog:
 
         info_frame = ctk.CTkFrame(frame, fg_color="transparent")
         info_frame.pack(fill=tk.X, pady=(5, 0))
-        ctk.CTkLabel(info_frame, text="📌 MAC-адрес обязателен для каждого интерфейса", font=("Arial", 10),
+        ctk.CTkLabel(info_frame, text="📌 MAC-адрес обязателен для каждого интерфейса", font=("Segoe UI", 10),
                      text_color="gray").pack(side=tk.LEFT)
 
     def _get_canvas_bg_color(self):
@@ -685,7 +685,7 @@ class VMCreationDialog:
 
         ctk.CTkEntry(frame, textvariable=mac_var, width=130, placeholder_text="MAC-адрес").pack(side=tk.LEFT, padx=2)
         ctk.CTkEntry(frame, textvariable=ip_var, width=120, placeholder_text="IP-адрес").pack(side=tk.LEFT, padx=2)
-        ctk.CTkLabel(frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(frame, text="/", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
         ctk.CTkEntry(frame, textvariable=mask_var, width=60, placeholder_text="маска").pack(side=tk.LEFT, padx=2)
 
         ctk.CTkButton(frame, text="✕", width=30, command=lambda pid=port["port_id"]: self.remove_vm_port(pid)).pack(

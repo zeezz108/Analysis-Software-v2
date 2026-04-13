@@ -109,19 +109,19 @@ class OSIDecompositionView:
             self.canvas.create_text(
                 from_x - z(14), mid_y,
                 text=path.path_id, fill=chi_label_color,
-                font=("Arial", self._font_z(9), "bold"), angle=90
+                font=("Segoe UI", self._font_z(9), "bold"), angle=90
             )
 
             # Имена узлов на концах
             self.canvas.create_text(
                 from_x + z(14), from_y + z(8),
                 text=top["node"].name, fill=chi_label_color,
-                font=("Arial", self._font_z(7)), anchor="w"
+                font=("Segoe UI", self._font_z(7)), anchor="w"
             )
             self.canvas.create_text(
                 to_x + z(14), to_y - z(8),
                 text=bottom["node"].name, fill=chi_label_color,
-                font=("Arial", self._font_z(7)), anchor="w"
+                font=("Segoe UI", self._font_z(7)), anchor="w"
             )
 
             path_counter += 1
@@ -136,10 +136,10 @@ class OSIDecompositionView:
         - Пользовательский ↔ Прикладной уровень ЭМВОС
         """
         # Цвета связей
-        KERN_COLOR = "#7986CB"
-        HW_COLOR = "#90A4AE"
-        USER_COLOR = "#EF5350"
-        LABEL_COLOR = "#FFFFFF"
+        KERN_COLOR = self._p("conn_kern")
+        HW_COLOR = self._p("conn_hw")
+        USER_COLOR = self._p("conn_user")
+        LABEL_COLOR = self._p("conn_label")
         z = self._z
 
         kern_pos = row_positions.get(OSILevel.KERNEL)
@@ -172,7 +172,7 @@ class OSIDecompositionView:
             self.canvas.create_text(
                 trace_x - z(10), (from_y + to_y) / 2,
                 text=label, fill=LABEL_COLOR,
-                font=("Arial", self._font_z(8), "bold"), angle=90
+                font=("Segoe UI", self._font_z(8), "bold"), angle=90
             )
 
         t = 0  # счётчик трасс
@@ -185,6 +185,17 @@ class OSIDecompositionView:
                 row_x1, (hw_pos[0] + hw_pos[1]) / 2,
                 trace_base - t * trace_gap,
                 HW_COLOR, "Разъёмы", dashed=True
+            )
+            t += 1
+
+        # --- Канальный ЭМВОС → Ядро ОС (MAC/LLC) ---
+        dl_col = col_centers.get(OSILevel.DATA_LINK)
+        if kern_pos and dl_col:
+            _routed(
+                dl_col[3], (dl_col[1] + dl_col[2]) / 2,
+                row_x1, (kern_pos[0] + kern_pos[1]) / 2 - z(20),
+                trace_base - t * trace_gap,
+                KERN_COLOR, "MAC/LLC", width=1, dashed=True
             )
             t += 1
 
@@ -232,6 +243,16 @@ class OSIDecompositionView:
                 USER_COLOR, "UI / ПО", width=1, dashed=True
             )
 
+        # --- Пользовательский → Аппаратный (USB-периферия) ---
+        if user_pos and hw_pos:
+            right_trace2 = row_x2 + z(26)  # вторая трасса в правом коридоре
+            _routed(
+                row_x2, (user_pos[0] + user_pos[1]) / 2,
+                row_x2, (hw_pos[0] + hw_pos[1]) / 2,
+                right_trace2,
+                HW_COLOR, "USB"
+            )
+
     def _draw_hardware_level(self, rx1, ry, rx2, comps, bg, border, text_color,
                               comp_h, comp_gap):
         """Рисует аппаратный уровень со связями между компонентами.
@@ -241,8 +262,8 @@ class OSIDecompositionView:
         """
         z = self._z
         row_w = rx2 - rx1
-        hw_comp_w = z(130)
-        hw_comp_h = z(28)
+        hw_comp_w = z(170)
+        hw_comp_h = z(36)
 
         # Разделяем компоненты по ролям
         motherboard = None
@@ -266,53 +287,79 @@ class OSIDecompositionView:
         self.canvas.create_rectangle(rx1, ry, rx2, ry + row_h,
                                       fill=bg, outline=border, width=2)
         self.canvas.create_text(rx1 + 15, ry + 15, text="Аппаратный уровень",
-                                 anchor="w", fill=text_color, font=("Arial", self._font_z(11), "bold"))
+                                 anchor="w", fill=text_color, font=("Segoe UI", self._font_z(11), "bold"))
 
         # Центр блока
         center_x = (rx1 + rx2) / 2
         center_y = ry + row_h / 2 + 10
 
         # --- Материнская плата (центр) ---
-        mb_w = z(180)
-        mb_h = z(36)
+        mb_w = z(220)
+        mb_h = z(42)
         mb_x1 = center_x - mb_w / 2
         mb_y1 = center_y - mb_h / 2
 
         if motherboard:
+            mb_vuln = motherboard.has_vulnerability
             self.canvas.create_rectangle(
                 mb_x1, mb_y1, mb_x1 + mb_w, mb_y1 + mb_h,
-                fill="#1A2332", outline="#607D8B", width=2
+                fill=self._p("comp_vuln_bg") if mb_vuln else self._p("hw_center_bg"),
+                outline=self._p("comp_vuln_border") if mb_vuln else self._p("hw_center_border"), width=2
             )
-            text = motherboard.name
-            if len(text) > 24:
-                text = text[:22] + "…"
+            text = self._display_name(motherboard.name)
+            if len(text) > 30:
+                text = text[:28] + "…"
             self.canvas.create_text(center_x, center_y,
-                                     text=text, fill="#B0BEC5",
-                                     font=("Arial", self._font_z(9), "bold"), width=mb_w - 10)
+                                     text=text, fill=self._p("hw_center_text"),
+                                     font=("Segoe UI", self._font_z(9), "bold"), width=mb_w - 10)
+            if mb_vuln:
+                bx = mb_x1 + mb_w - z(6)
+                by = mb_y1 + z(3)
+                self.canvas.create_oval(
+                    bx - z(8), by - z(1), bx + z(8), by + z(11),
+                    fill="#F44336", outline=""
+                )
+                self.canvas.create_text(
+                    bx, by + z(5), text=str(len(motherboard.cve_list)),
+                    fill="#FFFFFF", font=("Segoe UI", self._font_z(7), "bold")
+                )
 
         # --- Процессор (слева от мат.платы) ---
         if cpu:
             cpu_x = mb_x1 - hw_comp_w - z(30)
             cpu_y = center_y - hw_comp_h / 2
+            cpu_vuln = cpu.has_vulnerability
             self.canvas.create_rectangle(
                 cpu_x, cpu_y, cpu_x + hw_comp_w, cpu_y + hw_comp_h,
-                fill="#2D3748", outline="#FF9800", width=2
+                fill=self._p("comp_vuln_bg") if cpu_vuln else self._p("comp_bg"),
+                outline=self._p("comp_vuln_border") if cpu_vuln else self._p("hw_cpu_border"), width=2
             )
-            text = cpu.name
-            if len(text) > 18:
-                text = text[:16] + "…"
+            text = self._display_name(cpu.name)
+            if len(text) > 24:
+                text = text[:22] + "…"
             self.canvas.create_text(cpu_x + hw_comp_w / 2, cpu_y + hw_comp_h / 2,
-                                     text=text, fill="#FFE0B2",
-                                     font=("Arial", self._font_z(8)), width=hw_comp_w - 8)
+                                     text=text, fill=self._p("hw_cpu_text"),
+                                     font=("Segoe UI", self._font_z(9)), width=hw_comp_w - 10)
+            if cpu_vuln:
+                bx = cpu_x + hw_comp_w - z(6)
+                by = cpu_y + z(3)
+                self.canvas.create_oval(
+                    bx - z(8), by - z(1), bx + z(8), by + z(11),
+                    fill="#F44336", outline=""
+                )
+                self.canvas.create_text(
+                    bx, by + z(5), text=str(len(cpu.cve_list)),
+                    fill="#FFFFFF", font=("Segoe UI", self._font_z(7), "bold")
+                )
             # Связь CPU → Мат.плата
             self.canvas.create_line(
                 cpu_x + hw_comp_w, center_y, mb_x1, center_y,
-                fill="#FF9800", width=2, arrow=tk.BOTH, arrowshape=(6, 8, 3)
+                fill=self._p("hw_bus_color"), width=2, arrow=tk.BOTH, arrowshape=(6, 8, 3)
             )
             # Подпись шины
             self.canvas.create_text(
                 (cpu_x + hw_comp_w + mb_x1) / 2, center_y - 10,
-                text="DMI", fill="#FF9800", font=("Arial", self._font_z(7), "bold")
+                text="DMI", fill=self._p("hw_bus_color"), font=("Segoe UI", self._font_z(7), "bold")
             )
 
         # --- Остальные компоненты (справа от мат.платы, в столбик) ---
@@ -328,18 +375,33 @@ class OSIDecompositionView:
             cx = start_x + col * (hw_comp_w + z(10))
             cy = start_y + row * (hw_comp_h + z(8))
 
+            if comp.has_vulnerability:
+                c_fill, c_out, c_w = self._p("comp_vuln_bg"), self._p("comp_vuln_border"), 2
+            else:
+                c_fill, c_out, c_w = self._p("comp_bg"), border, 1
             self.canvas.create_rectangle(
                 cx, cy, cx + hw_comp_w, cy + hw_comp_h,
-                fill="#2D3748", outline=border, width=1
+                fill=c_fill, outline=c_out, width=c_w
             )
-            text = comp.name
-            if len(text) > 18:
-                text = text[:16] + "…"
+            text = self._display_name(comp.name)
+            if len(text) > 24:
+                text = text[:22] + "…"
             self.canvas.create_text(
                 cx + hw_comp_w / 2, cy + hw_comp_h / 2,
                 text=text, fill=text_color,
-                font=("Arial", self._font_z(8)), width=hw_comp_w - 8
+                font=("Segoe UI", self._font_z(9)), width=hw_comp_w - 10
             )
+            if comp.has_vulnerability:
+                bx = cx + hw_comp_w - z(6)
+                by = cy + z(3)
+                self.canvas.create_oval(
+                    bx - z(8), by - z(1), bx + z(8), by + z(11),
+                    fill="#F44336", outline=""
+                )
+                self.canvas.create_text(
+                    bx, by + z(5), text=str(len(comp.cve_list)),
+                    fill="#FFFFFF", font=("Segoe UI", self._font_z(7), "bold")
+                )
 
             comp_positions.append((cx, cy + hw_comp_h / 2))
 
@@ -348,7 +410,7 @@ class OSIDecompositionView:
         for cx, cy in comp_positions:
             self.canvas.create_line(
                 mb_right, center_y, cx, cy,
-                fill="#455A64", width=1, dash=(3, 3)
+                fill=self._p("hw_link_color"), width=1, dash=(3, 3)
             )
 
         return row_h
@@ -365,6 +427,50 @@ class OSIDecompositionView:
 
         self._zoom = new_zoom
         self._draw()
+
+    def _on_find_vulnerabilities(self):
+        """Запускает поиск CVE для всех компонентов в фоновом потоке."""
+        import threading
+        import queue as _queue
+
+        self._vuln_btn.configure(text="Поиск…", state="disabled")
+        q = _queue.Queue()
+
+        def _worker():
+            try:
+                total = len(self.topology.decompositions)
+                for i, decomp in enumerate(self.topology.decompositions.values()):
+                    decomp.find_vulnerabilities()
+                    q.put(("progress", i + 1, total))
+                q.put(("done",))
+            except Exception:
+                q.put(("done",))
+
+        def _poll():
+            try:
+                while True:
+                    msg = q.get_nowait()
+                    if msg[0] == "done":
+                        self._vuln_btn.configure(
+                            text="Уязвимости найдены", state="disabled",
+                            fg_color="white"
+                        )
+                        self._draw()
+                        return
+                    elif msg[0] == "progress":
+                        self._vuln_btn.configure(
+                            text=f"Поиск… {msg[1]}/{msg[2]}"
+                        )
+            except _queue.Empty:
+                pass
+            try:
+                if self.window.winfo_exists():
+                    self.window.after(100, _poll)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.window.after(100, _poll)
 
     def _safe_close(self):
         """Закрытие окна с защитой от бага Python 3.13 + CTkToplevel."""
@@ -386,19 +492,27 @@ class OSIDecompositionView:
         header.pack_propagate(False)
 
         ctk.CTkLabel(header, text="Схема разложения узла по уровням ЭМВОС",
-                      font=("Arial", 16, "bold"),
+                      font=("Segoe UI", 16, "bold"),
                       text_color=color("text_primary")).pack(side=tk.LEFT)
 
         nodes = self.topology.get_ordered_nodes()
         ctk.CTkLabel(header,
                       text=f"Узлов: {len(nodes)} | Связей: {len(self.board.links)}",
-                      font=("Arial", 12),
+                      font=("Segoe UI", 12),
                       text_color=color("text_secondary")).pack(side=tk.LEFT, padx=(20, 0))
 
         ctk.CTkButton(header, text="Закрыть", command=self._safe_close,
                        width=100, height=34, corner_radius=8,
                        fg_color=color("ghost_bg"), hover_color=color("ghost_hover"),
                        text_color=color("text_primary")).pack(side=tk.RIGHT)
+
+        self._vuln_btn = ctk.CTkButton(
+            header, text="Найти уязвимости", command=self._on_find_vulnerabilities,
+            width=160, height=34, corner_radius=8,
+            fg_color="#B71C1C", hover_color="#D32F2F",
+            text_color="#FFFFFF"
+        )
+        self._vuln_btn.pack(side=tk.RIGHT, padx=(0, 10))
 
         # Canvas
         canvas_frame = ctk.CTkFrame(self.window, fg_color=color("card_bg"),
@@ -409,8 +523,9 @@ class OSIDecompositionView:
         h_scroll = ttk.Scrollbar(canvas_frame, orient=tk.HORIZONTAL)
         v_scroll = ttk.Scrollbar(canvas_frame, orient=tk.VERTICAL)
 
+        from utils.theme import c
         self.canvas = tk.Canvas(
-            canvas_frame, bg="#0B1120",
+            canvas_frame, bg=c("canvas_bg"),
             xscrollcommand=h_scroll.set, yscrollcommand=v_scroll.set,
             highlightthickness=0, bd=0
         )
@@ -431,16 +546,95 @@ class OSIDecompositionView:
 
         self._zoom = 1.0
 
-    # Цвета столбцов ЭМВОС
-    LEVEL_COLORS = {
-        OSILevel.PHYSICAL:     {"bg": "#1B3A4B", "border": "#2196F3", "text": "#90CAF9", "label": "Физический"},
-        OSILevel.DATA_LINK:    {"bg": "#1B3A2B", "border": "#4CAF50", "text": "#A5D6A7", "label": "Канальный"},
-        OSILevel.NETWORK:      {"bg": "#3A2B1B", "border": "#FF9800", "text": "#FFE0B2", "label": "Сетевой"},
-        OSILevel.TRANSPORT:    {"bg": "#3A1B2B", "border": "#E91E63", "text": "#F8BBD0", "label": "Транспортный"},
-        OSILevel.SESSION:      {"bg": "#2B1B3A", "border": "#9C27B0", "text": "#CE93D8", "label": "Сеансовый"},
-        OSILevel.PRESENTATION: {"bg": "#1B2B3A", "border": "#00BCD4", "text": "#80DEEA", "label": "Представления"},
-        OSILevel.APPLICATION:  {"bg": "#2B3A1B", "border": "#8BC34A", "text": "#C5E1A5", "label": "Прикладной"},
+    # Цвета столбцов ЭМВОС: dark / light
+    _LEVEL_COLORS_DARK = {
+        OSILevel.PHYSICAL:     {"bg": "#1B3A4B", "border": "#2196F3", "text": "#90CAF9"},
+        OSILevel.DATA_LINK:    {"bg": "#1B3A2B", "border": "#4CAF50", "text": "#A5D6A7"},
+        OSILevel.NETWORK:      {"bg": "#3A2B1B", "border": "#FF9800", "text": "#FFE0B2"},
+        OSILevel.TRANSPORT:    {"bg": "#3A1B2B", "border": "#E91E63", "text": "#F8BBD0"},
+        OSILevel.SESSION:      {"bg": "#2B1B3A", "border": "#9C27B0", "text": "#CE93D8"},
+        OSILevel.PRESENTATION: {"bg": "#1B2B3A", "border": "#00BCD4", "text": "#80DEEA"},
+        OSILevel.APPLICATION:  {"bg": "#2B3A1B", "border": "#8BC34A", "text": "#C5E1A5"},
     }
+    _LEVEL_COLORS_LIGHT = {
+        OSILevel.PHYSICAL:     {"bg": "#E3F2FD", "border": "#1565C0", "text": "#0D47A1"},
+        OSILevel.DATA_LINK:    {"bg": "#E8F5E9", "border": "#2E7D32", "text": "#1B5E20"},
+        OSILevel.NETWORK:      {"bg": "#FFF3E0", "border": "#E65100", "text": "#BF360C"},
+        OSILevel.TRANSPORT:    {"bg": "#FCE4EC", "border": "#C2185B", "text": "#880E4F"},
+        OSILevel.SESSION:      {"bg": "#F3E5F5", "border": "#7B1FA2", "text": "#4A148C"},
+        OSILevel.PRESENTATION: {"bg": "#E0F7FA", "border": "#00838F", "text": "#006064"},
+        OSILevel.APPLICATION:  {"bg": "#F1F8E9", "border": "#558B2F", "text": "#33691E"},
+    }
+
+    LEVEL_LABELS = {
+        OSILevel.PHYSICAL: "Физический", OSILevel.DATA_LINK: "Канальный",
+        OSILevel.NETWORK: "Сетевой", OSILevel.TRANSPORT: "Транспортный",
+        OSILevel.SESSION: "Сеансовый", OSILevel.PRESENTATION: "Представления",
+        OSILevel.APPLICATION: "Прикладной",
+    }
+
+    # Общая палитра dark / light
+    _PALETTE_DARK = {
+        "canvas_bg": "#0B1120", "node_bg": "#0F172A", "node_border": "#3B82F6",
+        "node_title": "#E2E8F0", "node_subtitle": "#94A3B8", "node_divider": "#334155",
+        "comp_bg": "#2D3748", "comp_vuln_bg": "#3D1A1A", "comp_vuln_border": "#F44336",
+        "link_color": "#5A6577", "badge_bg": "#F44336", "badge_text": "#FFFFFF",
+        "hw_center_bg": "#1A2332", "hw_center_border": "#607D8B", "hw_center_text": "#B0BEC5",
+        "hw_cpu_border": "#FF9800", "hw_cpu_text": "#FFE0B2", "hw_bus_color": "#FF9800",
+        "hw_link_color": "#455A64",
+        "extra_kernel":  {"bg": "#1A1A2E", "border": "#3F51B5", "text": "#9FA8DA"},
+        "extra_hw":      {"bg": "#1A1F2E", "border": "#607D8B", "text": "#B0BEC5"},
+        "extra_user":    {"bg": "#2E1A1A", "border": "#F44336", "text": "#EF9A9A"},
+        "conn_kern": "#7986CB", "conn_hw": "#90A4AE", "conn_user": "#EF5350",
+        "conn_label": "#FFFFFF",
+    }
+    _PALETTE_LIGHT = {
+        "canvas_bg": "#F8F9FB", "node_bg": "#FFFFFF", "node_border": "#1565C0",
+        "node_title": "#1A1A1A", "node_subtitle": "#555555", "node_divider": "#D0D0D0",
+        "comp_bg": "#F0F4F8", "comp_vuln_bg": "#FFEBEE", "comp_vuln_border": "#D32F2F",
+        "link_color": "#90A4AE", "badge_bg": "#D32F2F", "badge_text": "#FFFFFF",
+        "hw_center_bg": "#E8EAF6", "hw_center_border": "#5C6BC0", "hw_center_text": "#283593",
+        "hw_cpu_border": "#E65100", "hw_cpu_text": "#BF360C", "hw_bus_color": "#E65100",
+        "hw_link_color": "#90A4AE",
+        "extra_kernel":  {"bg": "#E8EAF6", "border": "#3F51B5", "text": "#1A237E"},
+        "extra_hw":      {"bg": "#ECEFF1", "border": "#546E7A", "text": "#263238"},
+        "extra_user":    {"bg": "#FFEBEE", "border": "#D32F2F", "text": "#B71C1C"},
+        "conn_kern": "#5C6BC0", "conn_hw": "#78909C", "conn_user": "#E53935",
+        "conn_label": "#333333",
+    }
+
+    def _p(self, key):
+        """Возвращает цвет из палитры под текущую тему."""
+        from utils.theme import current_mode
+        pal = self._PALETTE_LIGHT if current_mode() == "light" else self._PALETTE_DARK
+        return pal[key]
+
+    def _lc(self, level):
+        """Возвращает цвета столбца ЭМВОС под текущую тему."""
+        from utils.theme import current_mode
+        table = self._LEVEL_COLORS_LIGHT if current_mode() == "light" else self._LEVEL_COLORS_DARK
+        colors = table[level].copy()
+        colors["label"] = self.LEVEL_LABELS[level]
+        return colors
+
+    @staticmethod
+    def _display_name(name):
+        """Сокращает длинное имя компонента для отображения на схеме."""
+        # Ядро ОС: убираем «Подсистема»
+        _KERN_SHORT = {
+            "Подсистема драйверов устройств": "Драйверы устройств",
+            "Подсистема управления доступом": "Упр. доступом",
+            "Подсистема управления файлами": "Упр. файлами",
+            "Подсистема управления процессами": "Упр. процессами",
+        }
+        if name in _KERN_SHORT:
+            return _KERN_SHORT[name]
+        # Аппаратный: роль видна по расположению на схеме
+        for prefix in ("Процессор: ", "Видеоконтроллер: ",
+                        "Материнская плата: ", "HDD/SSD: ", "Память: "):
+            if name.startswith(prefix):
+                return name[len(prefix):]
+        return name
 
     # 7 уровней ЭМВОС в порядке стека (слева направо)
     OSI_STACK = [
@@ -464,7 +658,7 @@ class OSIDecompositionView:
         nodes = self.topology.get_ordered_nodes()
         if not nodes:
             self.canvas.create_text(400, 200, text="Нет узлов для анализа",
-                                     fill="#888888", font=("Arial", 18))
+                                     fill="#888888", font=("Segoe UI", 18))
             return
 
         z = self._z
@@ -525,23 +719,23 @@ class OSIDecompositionView:
         # ===== Рамка узла =====
         self.canvas.create_rectangle(
             x1, y1, x2, y2,
-            outline="#3B82F6", fill="#0F172A", width=2
+            outline=self._p("node_border"), fill=self._p("node_bg"), width=2
         )
 
         # ===== Заголовок узла =====
         self.canvas.create_text(
             (x1 + x2) / 2, y1 + 25,
             text=node.name,
-            fill="#E2E8F0", font=("Arial", self._font_z(18), "bold")
+            fill=self._p("node_title"), font=("Segoe UI", self._font_z(18), "bold")
         )
         self.canvas.create_text(
             (x1 + x2) / 2, y1 + 50,
             text=f"Тип: {node.type}",
-            fill="#94A3B8", font=("Arial", self._font_z(11))
+            fill=self._p("node_subtitle"), font=("Segoe UI", self._font_z(11))
         )
         self.canvas.create_line(
             x1 + 20, y1 + header_h, x2 - 20, y1 + header_h,
-            fill="#334155", width=1
+            fill=self._p("node_divider"), width=1
         )
 
         # ===== Разложение узла =====
@@ -567,22 +761,22 @@ class OSIDecompositionView:
         # Перерисовываем рамку узла с правильным размером
         self.canvas.create_rectangle(
             x1, y1, x2, y2,
-            outline="#3B82F6", fill="#0F172A", width=2
+            outline=self._p("node_border"), fill=self._p("node_bg"), width=2
         )
         # Перерисовываем заголовок (поверх рамки)
         self.canvas.create_text(
             (x1 + x2) / 2, y1 + 25,
             text=node.name,
-            fill="#E2E8F0", font=("Arial", self._font_z(18), "bold")
+            fill=self._p("node_title"), font=("Segoe UI", self._font_z(18), "bold")
         )
         self.canvas.create_text(
             (x1 + x2) / 2, y1 + 50,
             text=f"Тип: {node.type}",
-            fill="#94A3B8", font=("Arial", self._font_z(11))
+            fill=self._p("node_subtitle"), font=("Segoe UI", self._font_z(11))
         )
         self.canvas.create_line(
             x1 + 20, y1 + header_h, x2 - 20, y1 + header_h,
-            fill="#334155", width=1
+            fill=self._p("node_divider"), width=1
         )
 
         col_x = x1 + left_corridor  # столбцы ЭМВОС начинаются после коридора
@@ -591,9 +785,10 @@ class OSIDecompositionView:
         # Словарь для хранения координат центров столбцов (для связей)
         # level → (center_x, top_y, bottom_y)
         col_centers = {}
+        comp_rects = {}  # identifier → (x1, y1, x2, y2)
 
         for level in self.OSI_STACK:
-            colors = self.LEVEL_COLORS[level]
+            colors = self._lc(level)
 
             # Заголовок столбца
             self.canvas.create_rectangle(
@@ -604,7 +799,7 @@ class OSIDecompositionView:
             self.canvas.create_text(
                 col_x + col_width / 2, col_y + col_header_h / 2,
                 text=colors["label"],
-                fill=colors["text"], font=("Arial", self._font_z(10), "bold")
+                fill=colors["text"], font=("Segoe UI", self._font_z(10), "bold")
             )
 
             # Тело столбца
@@ -630,11 +825,20 @@ class OSIDecompositionView:
                 comps = decomp.get_components_by_level(level)
                 cy = body_y + comp_pad
                 for comp in comps:
+                    # Стиль: обычный или уязвимый
+                    if comp.has_vulnerability:
+                        c_fill = self._p("comp_vuln_bg")
+                        c_outline = self._p("comp_vuln_border")
+                        c_width = 2
+                    else:
+                        c_fill = self._p("comp_bg")
+                        c_outline = colors["border"]
+                        c_width = 1
                     # Прямоугольник компонента
                     self.canvas.create_rectangle(
                         col_x + 4, cy,
                         col_x + col_width - 4, cy + comp_h,
-                        fill="#2D3748", outline=colors["border"], width=1
+                        fill=c_fill, outline=c_outline, width=c_width
                     )
                     # Текст
                     text = comp.name
@@ -643,43 +847,86 @@ class OSIDecompositionView:
                     self.canvas.create_text(
                         col_x + col_width / 2, cy + comp_h / 2,
                         text=text,
-                        fill=colors["text"], font=("Arial", self._font_z(8)),
+                        fill=colors["text"], font=("Segoe UI", self._font_z(8)),
                         width=col_width - 14
                     )
+                    # Бейдж CVE
+                    if comp.has_vulnerability:
+                        badge_text = str(len(comp.cve_list))
+                        bx = col_x + col_width - 4 - z(6)
+                        by = cy + z(3)
+                        self.canvas.create_oval(
+                            bx - z(8), by - z(1),
+                            bx + z(8), by + z(11),
+                            fill=self._p("badge_bg"), outline=""
+                        )
+                        self.canvas.create_text(
+                            bx, by + z(5),
+                            text=badge_text, fill=self._p("badge_text"),
+                            font=("Segoe UI", self._font_z(7), "bold")
+                        )
+                    if comp.identifier:
+                        comp_rects[comp.identifier] = (
+                            col_x + 4, cy,
+                            col_x + col_width - 4, cy + comp_h
+                        )
                     cy += comp_h + comp_gap
 
             col_x += col_width + col_gap
 
-        # ===== Связи между столбцами ЭМВОС (стек данных) =====
-        # Горизонтальные стрелки от правой грани одного столбца
-        # к левой грани следующего — по центральной высоте.
-        for i in range(len(self.OSI_STACK) - 1):
-            level_a = self.OSI_STACK[i]
-            level_b = self.OSI_STACK[i + 1]
-
-            if level_a not in col_centers or level_b not in col_centers:
+        # ===== Связи между компонентами соседних столбцов ЭМВОС =====
+        _COMP_LINKS = [
+            ("f2.1",  "z1"),    # IEEE 802.3 → IEEE 802
+            ("f2.2",  "z1"),    # IEEE 802.11 → IEEE 802
+            ("z4",    "l1"),    # ARP → IP-адрес
+            ("z3",    "l6"),    # MAC-адрес → ARP-таблица
+            ("l2",    "t1.1"),  # IPv4 → TCP
+            ("l2",    "t2.1"),  # IPv4 → UDP
+            ("t1.1",  "d5"),    # TCP → HTTPУС
+            ("d5",    "r7"),    # HTTPУС → SSL/TLS
+            ("r8",    "q9"),    # HTTPКД → HTTPппо-клиент
+            ("r8",    "q9s"),   # HTTPКД → HTTPппо-сервер
+        ]
+        link_color = self._p("link_color")
+        for src_id, dst_id in _COMP_LINKS:
+            src = comp_rects.get(src_id)
+            dst = comp_rects.get(dst_id)
+            if not src or not dst:
                 continue
-
-            ca = col_centers[level_a]
-            cb = col_centers[level_b]
-
-            # Точка выхода: правый край столбца A, середина по высоте
-            mid_y = (ca[1] + ca[2]) / 2
-            ax = ca[4]  # right_x столбца A
-            bx = cb[3]  # left_x столбца B
-
-            # Стрелка
-            self.canvas.create_line(
-                ax, mid_y, bx, mid_y,
-                fill="#4A5568", width=2,
-                arrow=tk.LAST, arrowshape=(8, 10, 4)
-            )
+            from_x = src[2]
+            from_y = (src[1] + src[3]) / 2
+            to_x = dst[0]
+            to_y = (dst[1] + dst[3]) / 2
+            mid_x = (from_x + to_x) / 2
+            if abs(from_y - to_y) < 3:
+                self.canvas.create_line(
+                    from_x, from_y, to_x, to_y,
+                    fill=link_color, width=1, dash=(3, 3),
+                    arrow=tk.LAST, arrowshape=(5, 7, 3)
+                )
+            else:
+                self.canvas.create_line(
+                    from_x, from_y, mid_x, from_y,
+                    fill=link_color, width=1, dash=(3, 3)
+                )
+                self.canvas.create_line(
+                    mid_x, from_y, mid_x, to_y,
+                    fill=link_color, width=1, dash=(3, 3)
+                )
+                self.canvas.create_line(
+                    mid_x, to_y, to_x, to_y,
+                    fill=link_color, width=1, dash=(3, 3),
+                    arrow=tk.LAST, arrowshape=(5, 7, 3)
+                )
 
         # ===== Дополнительные строки под стеком ЭМВОС =====
+        _ek = self._p("extra_kernel")
+        _eh = self._p("extra_hw")
+        _eu = self._p("extra_user")
         extra_levels = [
-            (OSILevel.KERNEL, "Подсистемы ядра ОС", "#1A1A2E", "#3F51B5", "#9FA8DA"),
-            (OSILevel.HARDWARE, "Аппаратный уровень", "#1A1F2E", "#607D8B", "#B0BEC5"),
-            (OSILevel.USER, "Пользовательский уровень", "#2E1A1A", "#F44336", "#EF9A9A"),
+            (OSILevel.KERNEL, "Подсистемы ядра ОС", _ek["bg"], _ek["border"], _ek["text"]),
+            (OSILevel.HARDWARE, "Аппаратный уровень", _eh["bg"], _eh["border"], _eh["text"]),
+            (OSILevel.USER, "Пользовательский уровень", _eu["bg"], _eu["border"], _eu["text"]),
         ]
 
         row_y = col_y + col_header_h + col_body_h + 40  # под столбцами ЭМВОС (увеличен зазор)
@@ -700,8 +947,9 @@ class OSIDecompositionView:
                     bg, border, text_color, comp_h, comp_gap
                 )
             else:
-                # Обычная строка — компоненты по 3-4 в ряд
-                items_per_row = max(1, (row_x2 - row_x1 - 20) // (col_width + 4))
+                # Обычная строка — компоненты в ряд (шире чем столбцы ЭМВОС)
+                extra_cw = z(200)
+                items_per_row = max(1, (row_x2 - row_x1 - 20) // (extra_cw + 6))
                 rows_needed = max(1, (len(comps) + items_per_row - 1) // items_per_row) if comps else 1
                 row_h = 40 + rows_needed * (comp_h + comp_gap)
 
@@ -712,7 +960,7 @@ class OSIDecompositionView:
                 self.canvas.create_text(
                     row_x1 + 15, row_y + 15,
                     text=title, anchor="w",
-                    fill=text_color, font=("Arial", self._font_z(11), "bold")
+                    fill=text_color, font=("Segoe UI", self._font_z(11), "bold")
                 )
 
                 if comps:
@@ -723,23 +971,40 @@ class OSIDecompositionView:
                         col_in_row = idx % items_per_row
                         row_in_block = idx // items_per_row
 
-                        comp_x = cx + col_in_row * (col_width + 4)
+                        comp_x = cx + col_in_row * (extra_cw + 6)
                         comp_y = cy + row_in_block * (comp_h + comp_gap)
 
+                        if comp.has_vulnerability:
+                            c_fill, c_out, c_w = self._p("comp_vuln_bg"), self._p("comp_vuln_border"), 2
+                        else:
+                            c_fill, c_out, c_w = self._p("comp_bg"), border, 1
                         self.canvas.create_rectangle(
                             comp_x, comp_y,
-                            comp_x + col_width - 8, comp_y + comp_h,
-                            fill="#2D3748", outline=border, width=1
+                            comp_x + extra_cw - 8, comp_y + comp_h,
+                            fill=c_fill, outline=c_out, width=c_w
                         )
-                        text = comp.name
-                        if len(text) > 20:
-                            text = text[:18] + "…"
+                        text = self._display_name(comp.name)
+                        if len(text) > 26:
+                            text = text[:24] + "…"
                         self.canvas.create_text(
-                            comp_x + (col_width - 8) / 2, comp_y + comp_h / 2,
+                            comp_x + (extra_cw - 8) / 2, comp_y + comp_h / 2,
                             text=text,
-                            fill=text_color, font=("Arial", self._font_z(8)),
-                            width=col_width - 16
+                            fill=text_color, font=("Segoe UI", self._font_z(9)),
+                            width=extra_cw - 16
                         )
+                        if comp.has_vulnerability:
+                            bx = comp_x + extra_cw - 8 - z(6)
+                            by = comp_y + z(3)
+                            self.canvas.create_oval(
+                                bx - z(8), by - z(1), bx + z(8), by + z(11),
+                                fill=self._p("badge_bg"), outline=""
+                            )
+                            self.canvas.create_text(
+                                bx, by + z(5),
+                                text=str(len(comp.cve_list)),
+                                fill=self._p("badge_text"),
+                                font=("Segoe UI", self._font_z(7), "bold")
+                            )
 
             row_positions[level] = (row_y, row_y + row_h, row_x1, row_x2)
             row_y += row_h + 30  # увеличен зазор между строками для связей
@@ -756,7 +1021,7 @@ class OSIDecompositionView:
         # Рамка узла поверх всего (перерисовка с правильным размером)
         self.canvas.create_rectangle(
             x1, y1, x2, y2,
-            outline="#3B82F6", fill="", width=2
+            outline=self._p("node_border"), fill="", width=2
         )
 
         return (node_height, node_width)

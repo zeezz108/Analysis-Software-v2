@@ -123,17 +123,17 @@ class PropertiesDialog:
 
         ctk.CTkLabel(
             self.loading_frame, text=f"Загрузка данных для {self.element.name}...",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(pady=(0, 20))
 
         self.animation_label = ctk.CTkLabel(
-            self.loading_frame, text="⏳", font=("Arial", 48, "bold"), text_color="#2196F3"
+            self.loading_frame, text="⏳", font=("Segoe UI", 48, "bold"), text_color="#2196F3"
         )
         self.animation_label.pack(pady=20)
 
         self.status_label = ctk.CTkLabel(
             self.loading_frame, text="Подключение к базе данных CVE...",
-            font=("Arial", 13), text_color="gray"
+            font=("Segoe UI", 13), text_color="gray"
         )
         self.status_label.pack(pady=(0, 20))
 
@@ -268,14 +268,14 @@ class PropertiesDialog:
         # Заголовок
         ctk.CTkLabel(
             self.dialog, text=f"Редактирование зоны: {self.element.name}",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(pady=(15, 15))
 
         # Название
         name_frame = ctk.CTkFrame(self.dialog)
         name_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
-        ctk.CTkLabel(name_frame, text="Название зоны:", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
+        ctk.CTkLabel(name_frame, text="Название зоны:", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, padx=10,
                                                                                          pady=(10, 5))
         self.name_var = tk.StringVar(value=self.element.name)
         ctk.CTkEntry(name_frame, textvariable=self.name_var, height=35).pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -284,7 +284,7 @@ class PropertiesDialog:
         desc_frame = ctk.CTkFrame(self.dialog)
         desc_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
 
-        ctk.CTkLabel(desc_frame, text="Описание зоны:", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10,
+        ctk.CTkLabel(desc_frame, text="Описание зоны:", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, padx=10,
                                                                                          pady=(10, 5))
         self.desc_var = tk.StringVar(value=self.element.description or "")
         ctk.CTkEntry(desc_frame, textvariable=self.desc_var, height=35).pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -303,14 +303,14 @@ class PropertiesDialog:
         # Заголовок
         ctk.CTkLabel(
             self.dialog, text=f"Редактирование: {get_node_type_russian(self.element.type)} - {self.element.name}",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(pady=(15, 10))
 
         # Имя узла
         name_frame = ctk.CTkFrame(self.dialog)
         name_frame.pack(fill=tk.X, padx=20, pady=(0, 10))
 
-        ctk.CTkLabel(name_frame, text="Имя узла:", font=("Arial", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 2))
+        ctk.CTkLabel(name_frame, text="Имя узла:", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 2))
         self.node_name_var = tk.StringVar(value=self.element.name)
         ctk.CTkEntry(name_frame, textvariable=self.node_name_var, height=35).pack(fill=tk.X, padx=10, pady=(0, 10))
 
@@ -405,7 +405,7 @@ class PropertiesDialog:
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
         var = tk.StringVar(value=current_value)
         if is_hardware:
@@ -421,7 +421,7 @@ class PropertiesDialog:
         ctk.CTkEntry(search_frame, textvariable=search_var, placeholder_text="🔍 Поиск...").pack(side=tk.LEFT, fill=tk.X,
                                                                                                 expand=True)
 
-        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Arial", 10), text_color="gray")
+        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Segoe UI", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
         # Список
@@ -483,7 +483,7 @@ class PropertiesDialog:
         selected_frame = ctk.CTkFrame(frame, fg_color="transparent")
         selected_frame.pack(fill=tk.X, pady=(10, 0))
 
-        ctk.CTkLabel(selected_frame, text="Выбрано:", font=("Arial", 11, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(selected_frame, text="Выбрано:", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT, padx=(0, 5))
         selected_label = ctk.CTkLabel(selected_frame, text=current_value if current_value else "не выбрано",
                                       text_color="green" if current_value else "gray")
         selected_label.pack(side=tk.LEFT)
@@ -542,11 +542,11 @@ class PropertiesDialog:
         header.pack(fill=tk.X, padx=16, pady=(12, 4))
         ctk.CTkLabel(
             header, text="🔌 Сетевые порты",
-            font=("Arial", 15, "bold"), text_color=text_primary, anchor="w"
+            font=("Segoe UI", 15, "bold"), text_color=text_primary, anchor="w"
         ).pack(side=tk.LEFT)
         ctk.CTkLabel(
             header, text="IP, MAC, VLAN и роли Wi-Fi",
-            font=("Arial", 10), text_color=text_muted, anchor="w"
+            font=("Segoe UI", 10), text_color=text_muted, anchor="w"
         ).pack(side=tk.LEFT, padx=(12, 0))
 
         ports_container = ctk.CTkFrame(ports_frame, fg_color="transparent")
@@ -559,25 +559,25 @@ class PropertiesDialog:
         usb_ports = [p for p in self.current_ports if p["port_type"] == "usb"]
 
         if eth_ports:
-            ctk.CTkLabel(ports_container, text="🔌 RJ45 порты:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(ports_container, text="🔌 RJ45 порты:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                  pady=(5, 2))
             for port in eth_ports:
                 self.create_port_editor_widget(ports_container, port)
 
         if pon_ports:
-            ctk.CTkLabel(ports_container, text="🔆 PON порты:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(ports_container, text="🔆 PON порты:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                 pady=(10, 2))
             for port in pon_ports:
                 self.create_port_editor_widget(ports_container, port)
 
         if wifi_ports:
-            ctk.CTkLabel(ports_container, text="📶 Wi-Fi порты:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(ports_container, text="📶 Wi-Fi порты:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                   pady=(10, 2))
             for port in wifi_ports:
                 self.create_wifi_port_editor_widget(ports_container, port, config)
 
         if usb_ports:
-            ctk.CTkLabel(ports_container, text="🔌 USB порты:", font=("Arial", 12, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(ports_container, text="🔌 USB порты:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W,
                                                                                                 pady=(10, 2))
             for port in usb_ports:
                 self.create_port_editor_widget(ports_container, port, show_network=False)
@@ -586,7 +586,7 @@ class PropertiesDialog:
         add_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
         add_frame.pack(fill=tk.X, padx=10, pady=(10, 10))
 
-        ctk.CTkLabel(add_frame, text="Добавить порт:", font=("Arial", 12)).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(add_frame, text="Добавить порт:", font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=(0, 5))
 
         self.new_port_type = tk.StringVar(value="ethernet")
         ctk.CTkRadioButton(add_frame, text="RJ45", variable=self.new_port_type, value="ethernet").pack(side=tk.LEFT,
@@ -634,10 +634,10 @@ class PropertiesDialog:
 
             ctk.CTkEntry(frame, textvariable=mac_var, width=120, placeholder_text="MAC").pack(side=tk.LEFT, padx=2)
             ctk.CTkEntry(frame, textvariable=ip_var, width=110, placeholder_text="IP").pack(side=tk.LEFT, padx=2)
-            ctk.CTkLabel(frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+            ctk.CTkLabel(frame, text="/", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
             ctk.CTkEntry(frame, textvariable=mask_var, width=50, placeholder_text="маска").pack(side=tk.LEFT,
                                                                                                 padx=(2, 5))
-            ctk.CTkLabel(frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
+            ctk.CTkLabel(frame, text="|", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=2)
             ctk.CTkEntry(frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN").pack(side=tk.LEFT, padx=2)
             ctk.CTkComboBox(frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90).pack(side=tk.LEFT,
                                                                                                          padx=2)
@@ -695,10 +695,10 @@ class PropertiesDialog:
 
         ctk.CTkEntry(fields_frame, textvariable=mac_var, width=120, placeholder_text="MAC").pack(side=tk.LEFT, padx=2)
         ctk.CTkEntry(fields_frame, textvariable=ip_var, width=110, placeholder_text="IP").pack(side=tk.LEFT, padx=2)
-        ctk.CTkLabel(fields_frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(fields_frame, text="/", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
         ctk.CTkEntry(fields_frame, textvariable=mask_var, width=50, placeholder_text="маска").pack(side=tk.LEFT,
                                                                                                    padx=(2, 5))
-        ctk.CTkLabel(fields_frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
+        ctk.CTkLabel(fields_frame, text="|", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=2)
         ctk.CTkEntry(fields_frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN").pack(side=tk.LEFT,
                                                                                                      padx=2)
         ctk.CTkComboBox(fields_frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90).pack(
@@ -760,21 +760,21 @@ class PropertiesDialog:
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text="📋 Таблица маршрутизации", font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame, text="📋 Таблица маршрутизации", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
         routes_count = len(self.element.routing_table) if hasattr(self.element, 'routing_table') else 0
-        ctk.CTkLabel(frame, text=f"Маршрутов в таблице: {routes_count}", font=("Arial", 12)).pack(anchor=tk.W,
+        ctk.CTkLabel(frame, text=f"Маршрутов в таблице: {routes_count}", font=("Segoe UI", 12)).pack(anchor=tk.W,
                                                                                                   pady=(0, 10))
 
         ctk.CTkButton(frame, text="📋 Открыть редактор маршрутизации", command=self.open_routing_editor, height=40,
-                      font=("Arial", 12, "bold")).pack(fill=tk.X, pady=10)
+                      font=("Segoe UI", 12, "bold")).pack(fill=tk.X, pady=10)
 
         # Предпросмотр
         if routes_count > 0:
             preview_frame = ctk.CTkFrame(frame)
             preview_frame.pack(fill=tk.BOTH, expand=True, pady=10)
 
-            ctk.CTkLabel(preview_frame, text="Предпросмотр (первые 5 записей):", font=("Arial", 12, "bold")).pack(
+            ctk.CTkLabel(preview_frame, text="Предпросмотр (первые 5 записей):", font=("Segoe UI", 12, "bold")).pack(
                 anchor=tk.W)
 
             preview_text = ctk.CTkTextbox(preview_frame, height=150)
@@ -804,13 +804,13 @@ class PropertiesDialog:
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text="🛡️ Настройки файервола", font=("Arial", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+        ctk.CTkLabel(frame, text="🛡️ Настройки файервола", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
 
         self.firewall_var = tk.BooleanVar(value=self.element.firewall_enabled)
-        ctk.CTkCheckBox(frame, text="Включить файервол", variable=self.firewall_var, font=("Arial", 13)).pack(
+        ctk.CTkCheckBox(frame, text="Включить файервол", variable=self.firewall_var, font=("Segoe UI", 13)).pack(
             anchor=tk.W, pady=5)
 
-        ctk.CTkLabel(frame, text="При включении файервола над узлом будет отображаться иконка щита", font=("Arial", 11),
+        ctk.CTkLabel(frame, text="При включении файервола над узлом будет отображаться иконка щита", font=("Segoe UI", 11),
                      text_color="gray").pack(anchor=tk.W, pady=(10, 0))
 
     def validate_network_fields(self) -> bool:
@@ -1155,13 +1155,13 @@ class ViewOnlyPropertiesDialog:
 
         ctk.CTkLabel(
             header_frame, text=f"{self.node.name}",
-            font=("Arial", 22, "bold"), text_color=text_primary
+            font=("Segoe UI", 22, "bold"), text_color=text_primary
         ).pack(anchor=tk.W)
 
         ctk.CTkLabel(
             header_frame,
             text=f"Тип: {self.get_node_type_russian(self.node.type)}",
-            font=("Arial", 12), text_color=text_secondary
+            font=("Segoe UI", 12), text_color=text_secondary
         ).pack(anchor=tk.W, pady=(2, 0))
 
         # Разделитель
@@ -1201,7 +1201,7 @@ class ViewOnlyPropertiesDialog:
             cat_header.pack(fill=tk.X, padx=20, pady=(14, 8))
             ctk.CTkLabel(
                 cat_header, text=category,
-                font=("Arial", 15, "bold"), text_color=primary
+                font=("Segoe UI", 15, "bold"), text_color=primary
             ).pack(anchor=tk.W)
 
             ctk.CTkFrame(card, height=1, fg_color=divider).pack(fill=tk.X, padx=20)
@@ -1228,17 +1228,17 @@ class ViewOnlyPropertiesDialog:
                     row = ctk.CTkFrame(content, fg_color="transparent")
                     row.pack(fill=tk.X, pady=3)
 
-                    ctk.CTkLabel(row, text=icon_char, font=("Arial", 14),
+                    ctk.CTkLabel(row, text=icon_char, font=("Segoe UI", 14),
                                   width=24, anchor="w",
                                   text_color=primary).pack(side=tk.LEFT, padx=(0, 8))
 
                     if isinstance(item, dict) and item.get("category"):
                         ctk.CTkLabel(row, text=f"[{item['category']}]:",
-                                      font=("Arial", 11, "bold"),
+                                      font=("Segoe UI", 11, "bold"),
                                       text_color=color("warning"),
                                       anchor="w").pack(side=tk.LEFT, padx=(0, 6))
 
-                    ctk.CTkLabel(row, text=item_text, font=("Arial", 12),
+                    ctk.CTkLabel(row, text=item_text, font=("Segoe UI", 12),
                                   text_color=text_primary, anchor="w",
                                   wraplength=600).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -1246,7 +1246,7 @@ class ViewOnlyPropertiesDialog:
             empty = ctk.CTkFrame(main_scroll, fg_color=card_bg, corner_radius=12)
             empty.pack(fill=tk.BOTH, expand=True, pady=40, padx=40)
             ctk.CTkLabel(empty, text="Нет данных о конфигурации узла",
-                          font=("Arial", 15), text_color=text_muted).pack(expand=True)
+                          font=("Segoe UI", 15), text_color=text_muted).pack(expand=True)
 
         # Кнопки
         btn_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
@@ -1256,14 +1256,14 @@ class ViewOnlyPropertiesDialog:
             btn_frame, text="⚙  Редактировать", command=self.open_edit_dialog,
             fg_color=primary, hover_color=primary_hover,
             text_color="#FFFFFF", width=160, height=42,
-            corner_radius=10, font=("Arial", 13, "bold")
+            corner_radius=10, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
             btn_frame, text="✕  Закрыть", command=self.dialog.destroy,
             fg_color=ghost_bg, hover_color=ghost_hover,
             text_color=text_primary, width=110, height=42,
-            corner_radius=10, font=("Arial", 13)
+            corner_radius=10, font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT)
 
         style_dialog(self.dialog, width=850, height=750)

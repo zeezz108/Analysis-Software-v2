@@ -105,7 +105,7 @@ class RouteEditDialog:
         # Заголовок
         ctk.CTkLabel(
             main_frame, text="Параметры маршрута",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(pady=(0, 15))
 
         # ===== Секция: тип маршрута =====
@@ -116,7 +116,7 @@ class RouteEditDialog:
         type_inner.pack(fill=tk.X, padx=15, pady=10)
 
         ctk.CTkLabel(type_inner, text="Тип маршрута:", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X)
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X)
 
         self.route_type_var = tk.StringVar(value=self._initial_type)
         types_row = ctk.CTkFrame(type_inner, fg_color="transparent")
@@ -137,7 +137,7 @@ class RouteEditDialog:
             type_inner,
             text="Connected routes (прямо подключённые сети) создаются автоматически "
                  "из IP/маски портов узла и редактируются во вкладке «Сеть».",
-            font=("Arial", 10), text_color="gray", wraplength=530, justify="left"
+            font=("Segoe UI", 10), text_color="gray", wraplength=530, justify="left"
         ).pack(fill=tk.X, pady=(6, 0))
 
         # ===== Секция: Назначение =====
@@ -148,7 +148,7 @@ class RouteEditDialog:
         dest_inner.pack(fill=tk.X, padx=15, pady=10)
 
         ctk.CTkLabel(dest_inner, text="Сеть назначения:", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X)
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X)
         self.dest_var = tk.StringVar(value=self.route.destination if self.route else "")
         self.dest_entry = ctk.CTkEntry(dest_inner, textvariable=self.dest_var,
                                         placeholder_text="например: 192.168.10.0",
@@ -156,7 +156,7 @@ class RouteEditDialog:
         self.dest_entry.pack(fill=tk.X, pady=(5, 5))
 
         ctk.CTkLabel(dest_inner, text="Маска сети:", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
         mask_frame = ctk.CTkFrame(dest_inner, fg_color="transparent")
         mask_frame.pack(fill=tk.X, pady=(5, 0))
         self.mask_var = tk.StringVar(value=self.route.netmask if self.route else "")
@@ -166,7 +166,7 @@ class RouteEditDialog:
         )
         self.mask_entry.pack(side=tk.LEFT)
         ctk.CTkLabel(mask_frame, text="CIDR (0–32) или десятичная",
-                      font=("Arial", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
+                      font=("Segoe UI", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
 
         # ===== Секция: Маршрутизация =====
         route_section = ctk.CTkFrame(main_frame, fg_color=section_bg, border_width=1,
@@ -176,7 +176,7 @@ class RouteEditDialog:
         route_inner.pack(fill=tk.X, padx=15, pady=10)
 
         ctk.CTkLabel(route_inner, text="Next-hop (шлюз):", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X)
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X)
         gw_frame = ctk.CTkFrame(route_inner, fg_color="transparent")
         gw_frame.pack(fill=tk.X, pady=(5, 5))
         self.gw_var = tk.StringVar(value=self.route.gateway if self.route else "")
@@ -186,10 +186,10 @@ class RouteEditDialog:
         )
         self.gw_entry.pack(side=tk.LEFT)
         ctk.CTkLabel(gw_frame, text="IP соседнего устройства на тракте",
-                      font=("Arial", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
+                      font=("Segoe UI", 10), text_color="gray").pack(side=tk.LEFT, padx=(10, 0))
 
         ctk.CTkLabel(route_inner, text="Выходной интерфейс:", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
         interfaces = self.get_available_interfaces()
         default_iface = (self.route.interface if self.route and self.route.interface in interfaces
                           else (interfaces[0] if interfaces else ""))
@@ -200,7 +200,7 @@ class RouteEditDialog:
         self.iface_combo.pack(fill=tk.X, pady=(5, 5))
 
         ctk.CTkLabel(route_inner, text="Metric (ниже = приоритетнее):", anchor=tk.W,
-                      font=("Arial", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
+                      font=("Segoe UI", 13, "bold")).pack(fill=tk.X, pady=(5, 0))
         metric_frame = ctk.CTkFrame(route_inner, fg_color="transparent")
         metric_frame.pack(fill=tk.X, pady=(5, 0))
         self.metric_var = tk.IntVar(value=self.route.metric if self.route else 10)
@@ -219,7 +219,7 @@ class RouteEditDialog:
         ).pack(side=tk.LEFT, padx=2)
         ctk.CTkLabel(
             metric_frame, text="обычно 1–10 для static, 10–100 для default",
-            font=("Arial", 10), text_color="gray"
+            font=("Segoe UI", 10), text_color="gray"
         ).pack(side=tk.LEFT, padx=(10, 0))
 
         # ===== Кнопки =====
@@ -228,11 +228,11 @@ class RouteEditDialog:
 
         ctk.CTkButton(
             btn_frame, text="✅ Сохранить", command=self.save_route,
-            fg_color="#4CAF50", width=120, height=38, font=("Arial", 13, "bold")
+            fg_color="#4CAF50", width=120, height=38, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=5)
         ctk.CTkButton(
             btn_frame, text="✕ Отмена", command=self.dialog.destroy,
-            fg_color="#CD3333", width=100, height=38, font=("Arial", 13)
+            fg_color="#CD3333", width=100, height=38, font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT, padx=5)
 
     def _apply_route_type_state(self):
@@ -415,11 +415,11 @@ class RoutingTableDialog:
         title_frame.pack(fill=tk.X, pady=(0, 10))
 
         ctk.CTkLabel(title_frame, text="📋 Таблица маршрутизации",
-                      font=("Arial", 18, "bold")).pack(side=tk.LEFT)
+                      font=("Segoe UI", 18, "bold")).pack(side=tk.LEFT)
         ctk.CTkLabel(
             title_frame,
             text=f"   Узел: {self.node.name}   •   Longest Prefix Match",
-            font=("Arial", 11), text_color="gray"
+            font=("Segoe UI", 11), text_color="gray"
         ).pack(side=tk.LEFT, padx=(15, 0))
 
         # ===== Легенда =====
@@ -437,7 +437,7 @@ class RoutingTableDialog:
         ]:
             pill = tk.Label(
                 legend_inner, text=text, bg=color, fg=fg,
-                font=("Arial", 10, "bold"), padx=8, pady=2, bd=1, relief=tk.SOLID
+                font=("Segoe UI", 10, "bold"), padx=8, pady=2, bd=1, relief=tk.SOLID
             )
             pill.pack(side=tk.LEFT, padx=(0, 8))
 
@@ -454,7 +454,7 @@ class RoutingTableDialog:
         ctk.CTkButton(toolbar, text="📋 Копировать CLI", command=self.copy_route,
                        width=140, height=32).pack(side=tk.LEFT, padx=2)
 
-        self.routes_count_label = ctk.CTkLabel(toolbar, text="", font=("Arial", 11))
+        self.routes_count_label = ctk.CTkLabel(toolbar, text="", font=("Segoe UI", 11))
         self.routes_count_label.pack(side=tk.LEFT, padx=(15, 0))
 
         ctk.CTkButton(toolbar, text="✅ Сохранить и закрыть", command=self.save,
@@ -472,15 +472,15 @@ class RoutingTableDialog:
         if ctk.get_appearance_mode() == "Dark":
             style.theme_use("clam")
             style.configure("Routing.Treeview", background="#2b2b2b", foreground="white",
-                             fieldbackground="#2b2b2b", font=("Arial", 10), rowheight=26)
+                             fieldbackground="#2b2b2b", font=("Segoe UI", 10), rowheight=26)
             style.configure("Routing.Treeview.Heading", background="#3b3b3b", foreground="white",
-                             font=("Arial", 10, "bold"))
+                             font=("Segoe UI", 10, "bold"))
         else:
             style.theme_use("clam")
             style.configure("Routing.Treeview", background="white", foreground="black",
-                             fieldbackground="white", font=("Arial", 10), rowheight=26)
+                             fieldbackground="white", font=("Segoe UI", 10), rowheight=26)
             style.configure("Routing.Treeview.Heading", background="#e0e0e0", foreground="black",
-                             font=("Arial", 10, "bold"))
+                             font=("Segoe UI", 10, "bold"))
 
         tree_wrapper = ctk.CTkFrame(table_frame, fg_color="transparent")
         tree_wrapper.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)

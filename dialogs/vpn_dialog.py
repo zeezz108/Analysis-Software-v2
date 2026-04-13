@@ -90,7 +90,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             main_frame,
             text=f"Настройка VPN на {self.node.name}",
-            font=("Arial", 18, "bold")
+            font=("Segoe UI", 18, "bold")
         ).pack(pady=(0, 20))
 
         # Горизонтальная раскладка блоков
@@ -114,7 +114,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             client_header,
             text="VPN-Клиент",
-            font=("Arial", 16, "bold"),
+            font=("Segoe UI", 16, "bold"),
             text_color="#1565C0"
         ).pack(side=tk.LEFT)
 
@@ -124,7 +124,7 @@ class VPNConfigDialog:
             text="Включен" if self.client_enabled_var.get() else "Выключен",
             variable=self.client_enabled_var,
             command=self.on_client_toggle,
-            font=("Arial", 12)
+            font=("Segoe UI", 12)
         )
         self.client_switch.pack(side=tk.RIGHT)
 
@@ -148,7 +148,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             server_header,
             text="VPN-Сервер",
-            font=("Arial", 16, "bold"),
+            font=("Segoe UI", 16, "bold"),
             text_color="#2E7D32"
         ).pack(side=tk.LEFT)
 
@@ -158,7 +158,7 @@ class VPNConfigDialog:
             text="Включен" if self.server_enabled_var.get() else "Выключен",
             variable=self.server_enabled_var,
             command=self.on_server_toggle,
-            font=("Arial", 12)
+            font=("Segoe UI", 12)
         )
         self.server_switch.pack(side=tk.RIGHT)
 
@@ -177,19 +177,19 @@ class VPNConfigDialog:
             btn_frame, text="🧪 Тестовые данные",
             command=self.fill_test_data, fg_color="#6A5ACD",
             hover_color="#5A4ABE",
-            width=160, height=38, font=("Arial", 12, "bold")
+            width=160, height=38, font=("Segoe UI", 12, "bold")
         ).pack(side=tk.LEFT, padx=5)
 
         ctk.CTkButton(
             btn_frame, text="✔ Сохранить",
             command=self.save_vpn, fg_color="#4CAF50",
-            width=120, height=38, font=("Arial", 13, "bold")
+            width=120, height=38, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=5)
 
         ctk.CTkButton(
             btn_frame, text="✕ Отмена",
             command=self.dialog.destroy, fg_color="#CD3333",
-            width=100, height=38, font=("Arial", 13)
+            width=100, height=38, font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT, padx=5)
 
         # Устанавливаем состояние настроек
@@ -205,7 +205,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             protocol_frame,
             text="VPN-протокол:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         current_client_protocol = getattr(self.node, "vpn_client_protocol", VPN_DEFAULT_PROTOCOL) or VPN_DEFAULT_PROTOCOL
@@ -226,7 +226,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             server_ip_frame,
             text="VPN IP сервера:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         self.client_server_ip = ctk.CTkEntry(
@@ -241,7 +241,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             port_frame,
             text="Порт сервера:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         port_row = ctk.CTkFrame(port_frame, fg_color="transparent")
@@ -259,7 +259,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             client_ip_frame,
             text="VPN IP узла (клиента):",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         client_ip_row = ctk.CTkFrame(client_ip_frame, fg_color="transparent")
@@ -270,7 +270,7 @@ class VPNConfigDialog:
         )
         self.client_virtual_ip.pack(side=tk.LEFT)
 
-        ctk.CTkLabel(client_ip_row, text="/", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=5)
+        ctk.CTkLabel(client_ip_row, text="/", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT, padx=5)
 
         self.client_virtual_mask = ctk.CTkEntry(
             client_ip_row, placeholder_text="24", width=60
@@ -284,7 +284,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             status_frame,
             text="Статус подключения:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         status_row = ctk.CTkFrame(status_frame, fg_color="transparent")
@@ -303,7 +303,7 @@ class VPNConfigDialog:
         self.status_label = ctk.CTkLabel(
             status_row,
             textvariable=self.connection_status_var,
-            font=("Arial", 12, "bold"),
+            font=("Segoe UI", 12, "bold"),
             text_color="red",
             anchor="w",
             wraplength=260,
@@ -320,7 +320,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             protocol_frame,
             text="VPN-протокол:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         current_server_protocol = getattr(self.node, "vpn_server_protocol", VPN_DEFAULT_PROTOCOL) or VPN_DEFAULT_PROTOCOL
@@ -341,7 +341,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             server_ip_frame,
             text="VPN IP сервера:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         server_ip_row = ctk.CTkFrame(server_ip_frame, fg_color="transparent")
@@ -352,7 +352,7 @@ class VPNConfigDialog:
         )
         self.server_virtual_ip.pack(side=tk.LEFT)
 
-        ctk.CTkLabel(server_ip_row, text="/", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=5)
+        ctk.CTkLabel(server_ip_row, text="/", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT, padx=5)
 
         self.server_virtual_mask = ctk.CTkEntry(
             server_ip_row, placeholder_text="24", width=60
@@ -366,7 +366,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             port_frame,
             text="Порт сервера:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         self.server_port = ctk.CTkEntry(
@@ -381,7 +381,7 @@ class VPNConfigDialog:
         ctk.CTkLabel(
             network_frame,
             text="Внутренняя сеть:",
-            font=("Arial", 12, "bold")
+            font=("Segoe UI", 12, "bold")
         ).pack(anchor=tk.W)
 
         network_row = ctk.CTkFrame(network_frame, fg_color="transparent")
@@ -392,7 +392,7 @@ class VPNConfigDialog:
         )
         self.server_network.pack(side=tk.LEFT)
 
-        ctk.CTkLabel(network_row, text="/", font=("Arial", 14, "bold")).pack(side=tk.LEFT, padx=5)
+        ctk.CTkLabel(network_row, text="/", font=("Segoe UI", 14, "bold")).pack(side=tk.LEFT, padx=5)
 
         self.server_network_mask = ctk.CTkEntry(
             network_row, placeholder_text="24", width=60

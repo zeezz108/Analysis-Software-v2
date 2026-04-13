@@ -46,6 +46,14 @@ def extract_cpe_components(component_string: str) -> Dict[str, str]:
     if not component_string:
         return result
 
+    # Убираем русские префиксы, чтобы первое слово было вендором
+    for pfx in ("Процессор: ", "Видеоконтроллер: ", "Материнская плата: ",
+                "HDD/SSD: ", "Память: ", "ОС: ", "Приложение: ",
+                "Мышь: ", "Клавиатура: ", "Принтер: ", "Монитор: "):
+        if component_string.startswith(pfx):
+            component_string = component_string[len(pfx):]
+            break
+
     parts = component_string.strip().split(' ')
 
     if len(parts) >= 2:
@@ -67,27 +75,40 @@ def extract_cpe_components(component_string: str) -> Dict[str, str]:
     # Специальная обработка для известных вендоров
     component_lower = component_string.lower()
 
-    # Microsoft Windows
+    # Microsoft Windows — product = windows_10, windows_11, etc. (как в NVD)
     if 'windows' in component_lower:
         result['vendor'] = 'microsoft'
         result['product'] = 'windows'
         for part in parts:
-            if part.isdigit() or part in ['10', '11', '8.1', '7', 'xp', 'vista']:
-                result['version'] = part
+            part_low = part.lower()
+            if part_low in ('10', '11', '7', 'xp', 'vista'):
+                result['product'] = f'windows_{part_low}'
+                result['version'] = part_low
+                break
+            elif part_low == '8.1':
+                result['product'] = 'windows_8.1'
+                result['version'] = '8.1'
+                break
+            elif part_low in ('server',) and 'server' in component_lower:
+                result['product'] = 'windows_server'
+                # Ищем год: 2016, 2019, 2022
+                ver_match = re.search(r'(20\d{2})', component_string)
+                if ver_match:
+                    result['product'] = f'windows_server_{ver_match.group(1)}'
+                    result['version'] = ver_match.group(1)
                 break
 
-    # Linux дистрибутивы
+    # Linux дистрибутивы — product = ubuntu_linux (как в NVD)
     elif 'ubuntu' in component_lower:
         result['vendor'] = 'canonical'
-        result['product'] = 'ubuntu'
-        # Извлекаем версию (например, "20.04")
+        result['product'] = 'ubuntu_linux'
         version_match = re.search(r'(\d+\.\d+)', component_string)
         if version_match:
             result['version'] = version_match.group(1)
 
     elif 'debian' in component_lower:
         result['vendor'] = 'debian'
-        result['product'] = 'debian'
+        result['product'] = 'debian_linux'
         version_match = re.search(r'(\d+)', component_string)
         if version_match:
             result['version'] = version_match.group(1)
@@ -162,6 +183,189 @@ def extract_cpe_components(component_string: str) -> Dict[str, str]:
             result['product'] = 'vsphere'
         elif 'workstation' in component_lower:
             result['product'] = 'workstation'
+
+    # ASUS (материнские платы, мониторы и т.д.)
+    elif 'asus' in component_lower:
+        result['vendor'] = 'asus'
+        if 'rog' in component_lower:
+            result['product'] = 'rog'
+        elif 'prime' in component_lower:
+            result['product'] = 'prime'
+        elif 'tuf' in component_lower:
+            result['product'] = 'tuf'
+
+    # Gigabyte
+    elif 'gigabyte' in component_lower:
+        result['vendor'] = 'gigabyte'
+        if 'aorus' in component_lower:
+            result['product'] = 'aorus'
+
+    # MSI
+    elif 'msi' in component_lower:
+        result['vendor'] = 'msi'
+
+    # ASRock
+    elif 'asrock' in component_lower:
+        result['vendor'] = 'asrock'
+
+    # Crucial (SSD)
+    elif 'crucial' in component_lower:
+        result['vendor'] = 'crucial'
+        if 'mx500' in component_lower:
+            result['product'] = 'mx500'
+        elif 'bx500' in component_lower:
+            result['product'] = 'bx500'
+
+    # Samsung (SSD, мониторы)
+    elif 'samsung' in component_lower:
+        result['vendor'] = 'samsung'
+        result['version'] = ''
+        for model in ('870_evo', '860_evo', '980_pro', '970_evo', '850_evo'):
+            if model.replace('_', ' ') in component_lower:
+                result['product'] = model
+                break
+
+    # Western Digital
+    elif 'western digital' in component_lower or component_lower.startswith('wd '):
+        result['vendor'] = 'western_digital'
+
+    # Seagate
+    elif 'seagate' in component_lower:
+        result['vendor'] = 'seagate'
+        if 'barracuda' in component_lower:
+            result['product'] = 'barracuda'
+        elif 'ironwolf' in component_lower:
+            result['product'] = 'ironwolf'
+
+    # Kingston
+    elif 'kingston' in component_lower:
+        result['vendor'] = 'kingston'
+
+    # Corsair
+    elif 'corsair' in component_lower:
+        result['vendor'] = 'corsair'
+
+    # A4Tech (мыши, клавиатуры)
+    elif 'a4tech' in component_lower:
+        result['vendor'] = 'a4tech'
+
+    # Logitech
+    elif 'logitech' in component_lower:
+        result['vendor'] = 'logitech'
+        result['version'] = ''
+        # Модель как product: G502, G Pro, K360 и т.д.
+        model = re.search(r'logitech\s+(\S+)', component_lower)
+        if model:
+            result['product'] = model.group(1)
+
+    # HP (мониторы, принтеры)
+    elif component_lower.startswith('hp ') or 'hewlett' in component_lower:
+        result['vendor'] = 'hp'
+
+    # Dell
+    elif 'dell' in component_lower:
+        result['vendor'] = 'dell'
+
+    # Brother (принтеры)
+    elif 'brother' in component_lower:
+        result['vendor'] = 'brother'
+
+    # BenQ
+    elif 'benq' in component_lower:
+        result['vendor'] = 'benq'
+
+    # Apple
+    elif 'apple' in component_lower:
+        result['vendor'] = 'apple'
+        if 'mac os' in component_lower or 'macos' in component_lower:
+            result['product'] = 'macos'
+            _mac_versions = {
+                'sequoia': '15', 'sonoma': '14', 'ventura': '13',
+                'monterey': '12', 'big sur': '11', 'catalina': '10.15',
+                'mojave': '10.14', 'high sierra': '10.13',
+            }
+            for name, ver in _mac_versions.items():
+                if name in component_lower:
+                    result['version'] = ver
+                    break
+        elif 'ios' in component_lower:
+            result['product'] = 'iphone_os'
+
+    # ===== Приложения (серверное ПО, браузеры) =====
+    elif 'apache' in component_lower:
+        result['vendor'] = 'apache'
+        if 'tomcat' in component_lower:
+            result['product'] = 'tomcat'
+        elif 'kafka' in component_lower:
+            result['product'] = 'kafka'
+        else:
+            result['product'] = 'http_server'
+        ver = re.search(r'(\d+\.\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'nginx' in component_lower:
+        result['vendor'] = 'f5'
+        result['product'] = 'nginx'
+        ver = re.search(r'(\d+\.\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'postgresql' in component_lower or 'postgres' in component_lower:
+        result['vendor'] = 'postgresql'
+        result['product'] = 'postgresql'
+        ver = re.search(r'(\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'mysql' in component_lower:
+        result['vendor'] = 'oracle'
+        result['product'] = 'mysql'
+        ver = re.search(r'(\d+\.\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'chrome' in component_lower:
+        result['vendor'] = 'google'
+        result['product'] = 'chrome'
+        ver = re.search(r'(\d+)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'firefox' in component_lower:
+        result['vendor'] = 'mozilla'
+        result['product'] = 'firefox'
+        ver = re.search(r'(\d+)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'openssl' in component_lower:
+        result['vendor'] = 'openssl'
+        result['product'] = 'openssl'
+        ver = re.search(r'(\d+\.\d+[\.\d]*\w*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'python' in component_lower:
+        result['vendor'] = 'python'
+        result['product'] = 'python'
+        ver = re.search(r'(\d+\.\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'java' in component_lower or 'openjdk' in component_lower:
+        result['vendor'] = 'oracle'
+        result['product'] = 'jdk' if 'jdk' in component_lower else 'jre'
+        ver = re.search(r'(\d+)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
+
+    elif 'node' in component_lower and 'js' in component_lower:
+        result['vendor'] = 'nodejs'
+        result['product'] = 'node.js'
+        ver = re.search(r'(\d+\.\d+[\.\d]*)', component_string)
+        if ver:
+            result['version'] = ver.group(1)
 
     return result
 

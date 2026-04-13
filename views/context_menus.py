@@ -133,6 +133,11 @@ class NodeContextMenuHandler:
             command=lambda: canvas_view.open_routing_table(node)
         )
 
+        menu.add_command(
+            label="📄 Дублировать узел",
+            command=lambda: canvas_view.duplicate_node(node)
+        )
+
         menu.add_separator()
 
         # ===== УДАЛЕНИЕ =====

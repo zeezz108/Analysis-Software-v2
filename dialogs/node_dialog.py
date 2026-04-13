@@ -82,7 +82,7 @@ class NodeTypeSelectionDialog:
         main.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
 
         ctk.CTkLabel(main, text="Выберите тип создаваемого узла",
-                      font=("Arial", 18, "bold"), text_color=text_primary).pack(pady=(0, 20))
+                      font=("Segoe UI", 18, "bold"), text_color=text_primary).pack(pady=(0, 20))
 
         # --- Сетка карточек 4 + 3 ---
         grid = ctk.CTkFrame(main, fg_color="transparent")
@@ -124,12 +124,12 @@ class NodeTypeSelectionDialog:
                         pass
 
             if not icon_loaded:
-                ctk.CTkLabel(inner, text="[icon]", font=("Arial", 10),
+                ctk.CTkLabel(inner, text="[icon]", font=("Segoe UI", 10),
                               text_color=text_muted).pack(pady=(0, 6))
 
-            ctk.CTkLabel(inner, text=nt["title"], font=("Arial", 11, "bold"),
+            ctk.CTkLabel(inner, text=nt["title"], font=("Segoe UI", 11, "bold"),
                           text_color=text_primary, justify="center").pack()
-            ctk.CTkLabel(inner, text=nt["subtitle"], font=("Arial", 9),
+            ctk.CTkLabel(inner, text=nt["subtitle"], font=("Segoe UI", 9),
                           text_color=text_muted, justify="center").pack(pady=(2, 0))
 
             value = nt["value"]
@@ -148,14 +148,14 @@ class NodeTypeSelectionDialog:
             btn_frame, text="Далее →", command=self.select_type,
             fg_color=primary, hover_color=primary_hover,
             text_color="#FFFFFF", width=140, height=40,
-            corner_radius=10, font=("Arial", 13, "bold")
+            corner_radius=10, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=(8, 0))
 
         ctk.CTkButton(
             btn_frame, text="Отмена", command=self.dialog.destroy,
             fg_color=danger, hover_color=danger_hover,
             text_color="#FFFFFF", width=110, height=40,
-            corner_radius=10, font=("Arial", 13)
+            corner_radius=10, font=("Segoe UI", 13)
         ).pack(side=tk.RIGHT)
 
         self.dialog.bind("<Return>", lambda e: self.select_type())
@@ -352,18 +352,18 @@ class NodeCreationDialog:
 
         ctk.CTkLabel(
             content_frame, text="Загрузка конфигураций...",
-            font=("Arial", 22, "bold"), text_color=color("text_primary")
+            font=("Segoe UI", 22, "bold"), text_color=color("text_primary")
         ).pack(pady=(0, 30))
 
         self.animation_label = ctk.CTkLabel(
-            content_frame, text="⏳", font=("Arial", 72, "bold"),
+            content_frame, text="⏳", font=("Segoe UI", 72, "bold"),
             text_color=color("primary")
         )
         self.animation_label.pack(pady=20)
 
         self.status_label_loading = ctk.CTkLabel(
             content_frame, text="Подготовка данных для выбранного типа узла...",
-            font=("Arial", 14), text_color=color("text_muted")
+            font=("Segoe UI", 14), text_color=color("text_muted")
         )
         self.status_label_loading.pack(pady=(0, 20))
 
@@ -374,7 +374,7 @@ class NodeCreationDialog:
         if self.preselected_type:
             ctk.CTkLabel(
                 content_frame, text=f"Тип узла: {self.preselected_type}",
-                font=("Arial", 16, "bold"), text_color=color("text_primary")
+                font=("Segoe UI", 16, "bold"), text_color=color("text_primary")
             ).pack(pady=(30, 0))
 
         self.loading_active = True
@@ -536,7 +536,7 @@ class NodeCreationDialog:
         title_text = "Создание нового узла" if not self.is_edit_mode else f"Редактирование узла: {self.existing_node.name}"
         ctk.CTkLabel(
             self.dialog, text=title_text,
-            font=("Arial", 18, "bold"), text_color=color("text_primary")
+            font=("Segoe UI", 18, "bold"), text_color=color("text_primary")
         ).pack(pady=(15, 10))
 
         # --- Основные сведения (card с обводкой primary) ---
@@ -556,7 +556,7 @@ class NodeCreationDialog:
         # Имя
         name_col = ctk.CTkFrame(row, fg_color="transparent")
         name_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        ctk.CTkLabel(name_col, text="Имя узла", font=("Arial", 12, "bold"),
+        ctk.CTkLabel(name_col, text="Имя узла", font=("Segoe UI", 16, "bold"),
                       text_color=color("text_primary"), anchor="w").pack(fill=tk.X)
 
         if not hasattr(self, 'node_name_var') or not self.node_name_var:
@@ -581,7 +581,10 @@ class NodeCreationDialog:
                                         segmented_button_unselected_color=color("card_bg"))
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
         try:
-            self.notebook._segmented_button.configure(text_color=("#111827", "#E2E8F0"))
+            self.notebook._segmented_button.configure(
+                font=("Segoe UI", 13, "bold"),
+                text_color=("#111827", "#E2E8F0")
+            )
         except Exception:
             pass
 
@@ -594,7 +597,7 @@ class NodeCreationDialog:
         ctk.CTkButton(
             button_frame,
             text="Сохранить" if self.is_edit_mode else "Создать",
-            command=self.create_node, font=("Arial", 13, "bold"),
+            command=self.create_node, font=("Segoe UI", 14, "bold"),
             fg_color=color("success"), hover_color=color("success_hover"),
             text_color="#FFFFFF", width=130, height=40, corner_radius=10
         ).pack(side=tk.RIGHT, padx=(8, 0))
@@ -602,7 +605,7 @@ class NodeCreationDialog:
         ctk.CTkButton(
             button_frame, text="Отмена", command=self.dialog.destroy,
             fg_color=color("danger"), hover_color=color("danger_hover"),
-            text_color="#FFFFFF", font=("Arial", 13),
+            text_color="#FFFFFF", font=("Segoe UI", 14),
             width=110, height=40, corner_radius=10
         ).pack(side=tk.RIGHT)
 
@@ -637,10 +640,10 @@ class NodeCreationDialog:
                 pass
 
         self._preset_btn = ctk.CTkButton(
-            parent, text="📦 Загрузить пресет",
+            parent, text="Загрузить пресет",
             command=show_preset_menu, width=200, height=40,
             fg_color=color("accent"), hover_color=color("accent_hover"),
-            text_color="#FFFFFF", corner_radius=10, font=("Arial", 12, "bold")
+            text_color="#FFFFFF", corner_radius=10, font=("Segoe UI", 14, "bold")
         )
         self._preset_btn.pack(side=tk.LEFT)
 
@@ -689,7 +692,7 @@ class NodeCreationDialog:
 
         ctk.CTkLabel(
             self.zone_frame, text="Выбор зоны TIM для размещения",
-            font=("Arial", 12, "bold"), text_color=color("text_primary"),
+            font=("Segoe UI", 16, "bold"), text_color=color("text_primary"),
             anchor="w"
         ).pack(fill=tk.X)
 
@@ -705,7 +708,7 @@ class NodeCreationDialog:
             ctk.CTkLabel(
                 self.zone_frame,
                 text="Интернет-узел — свободная зона (вне TIM)",
-                font=("Arial", 11), text_color=color("text_muted"), anchor="w"
+                font=("Segoe UI", 11), text_color=color("text_muted"), anchor="w"
             ).pack(fill=tk.X, pady=(4, 0))
         else:
             tim_zones = self.board.get_tim_zones()
@@ -742,7 +745,7 @@ class NodeCreationDialog:
             else:
                 ctk.CTkLabel(
                     self.zone_frame, text="Сначала создайте зону TIM!",
-                    font=("Arial", 11), text_color=color("danger"), anchor="w"
+                    font=("Segoe UI", 11), text_color=color("danger"), anchor="w"
                 ).pack(fill=tk.X, pady=(4, 0))
 
     def _on_zone_combo_changed(self, choice: str):
@@ -870,7 +873,10 @@ class NodeCreationDialog:
         tv.pack(fill=tk.BOTH, expand=True)
         # Текст вкладок — чёрный на светлой теме, белый на тёмной
         try:
-            tv._segmented_button.configure(text_color=("#111827", "#E2E8F0"))
+            tv._segmented_button.configure(
+                font=("Segoe UI", 12, "bold"),
+                text_color=("#111827", "#E2E8F0")
+            )
         except Exception:
             pass
         return tv
@@ -937,7 +943,7 @@ class NodeCreationDialog:
                               corner_radius=10)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold"),
+        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),
                       text_color=_tc("text_primary")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         if current_value is None and self.is_edit_mode:
@@ -948,9 +954,9 @@ class NodeCreationDialog:
 
         # Поиск
         search_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        search_frame.pack(fill=tk.X, pady=(0, 10))
+        search_frame.pack(fill=tk.X, padx=8, pady=(0, 10))
 
-        ctk.CTkLabel(search_frame, text="🔍 Поиск:", font=("Arial", 12),
+        ctk.CTkLabel(search_frame, text="🔍 Поиск:", font=("Segoe UI", 12),
                       text_color=_tc("text_secondary")).pack(side=tk.LEFT, padx=(0, 5))
         search_var = tk.StringVar()
         ctk.CTkEntry(search_frame, textvariable=search_var,
@@ -958,22 +964,18 @@ class NodeCreationDialog:
                       fg_color=_tc("input_bg"), border_color=_tc("input_border"),
                       border_width=1).pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)} шт.)", font=("Arial", 10), text_color="gray")
+        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)} шт.)", font=("Segoe UI", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
-        # Список
+        # Список (высота ограничена чтобы обводка фрейма не обрезалась)
         list_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        list_frame.pack(fill=tk.BOTH, expand=True)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=(0, 8))
 
-        text_list = ctk.CTkTextbox(list_frame, wrap="none",
+        text_list = ctk.CTkTextbox(list_frame, wrap="none", height=280,
                                     fg_color=_tc("input_bg"),
                                     text_color=_tc("text_primary"))
-        text_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        text_list.pack(fill=tk.BOTH, expand=True)
         text_list.configure(cursor="hand2")
-
-        scrollbar = ctk.CTkScrollbar(list_frame, command=text_list.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        text_list.configure(yscrollcommand=scrollbar.set)
 
         for item in items:
             text_list.insert("end", item + "\n")
@@ -1041,9 +1043,9 @@ class NodeCreationDialog:
 
         # Выбранное значение
         selected_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        selected_frame.pack(fill=tk.X, pady=(10, 0))
+        selected_frame.pack(fill=tk.X, padx=8, pady=(10, 8))
 
-        ctk.CTkLabel(selected_frame, text="✅ Выбрано:", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        ctk.CTkLabel(selected_frame, text="✅ Выбрано:", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=(0, 5))
         selected_label = ctk.CTkLabel(selected_frame, text=current_value if current_value else "не выбрано",
                                       text_color="green" if current_value else "gray")
         selected_label.pack(side=tk.LEFT)
@@ -1069,7 +1071,7 @@ class NodeCreationDialog:
                               corner_radius=10)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        ctk.CTkLabel(frame, text=title, font=("Arial", 14, "bold"),
+        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),
                       text_color=_tc("text_primary")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
         # Загружаем текущие выбранные значения
@@ -1084,81 +1086,125 @@ class NodeCreationDialog:
 
         # Две колонки
         columns_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        columns_frame.pack(fill=tk.BOTH, expand=True)
-
-        is_dark = ctk.get_appearance_mode() == "Dark"
-        lb_bg = "#2b2b2b" if is_dark else "white"
-        lb_fg = "white" if is_dark else "black"
+        columns_frame.pack(fill=tk.BOTH, expand=True, padx=8)
 
         # === Левая колонка: доступные ===
-        left_frame = ctk.CTkFrame(columns_frame, fg_color="transparent")
+        left_frame = ctk.CTkFrame(columns_frame, fg_color=_tc("card_bg"),
+                                   border_width=1, border_color=_tc("card_border"),
+                                   corner_radius=8)
         left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
 
-        ctk.CTkLabel(left_frame, text="Доступные:", font=("Arial", 12, "bold"),
-                      text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 5))
+        ctk.CTkLabel(left_frame, text="Доступные:", font=("Segoe UI", 12, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, padx=8, pady=(8, 5))
 
         search_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        search_frame.pack(fill=tk.X, pady=(0, 5))
+        search_frame.pack(fill=tk.X, padx=8, pady=(0, 5))
 
         search_var = tk.StringVar()
         ctk.CTkEntry(search_frame, textvariable=search_var, placeholder_text="Поиск...", height=30).pack(
             side=tk.LEFT, fill=tk.X, expand=True)
 
-        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Arial", 10), text_color="gray")
+        count_label = ctk.CTkLabel(search_frame, text=f"({len(items)})", font=("Segoe UI", 10), text_color="gray")
         count_label.pack(side=tk.RIGHT, padx=(5, 0))
 
-        left_list_frame = ctk.CTkFrame(left_frame, fg_color="transparent")
-        left_list_frame.pack(fill=tk.BOTH, expand=True)
+        available_text = ctk.CTkTextbox(left_frame, wrap="none", height=250,
+                                         fg_color=_tc("input_bg"),
+                                         text_color=_tc("text_primary"))
+        available_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        available_text.configure(cursor="hand2")
 
-        available_listbox = tk.Listbox(
-            left_list_frame, bg=lb_bg, fg=lb_fg, font=("Arial", 10),
-            height=12, selectmode=tk.MULTIPLE, selectbackground="#3a7ebf",
-            selectforeground="white", activestyle="none"
-        )
-        left_scroll = ctk.CTkScrollbar(left_list_frame, command=available_listbox.yview)
-        left_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        available_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        available_listbox.configure(yscrollcommand=left_scroll.set)
+        # Множество выбранных строк в левом списке (для подсветки)
+        _left_selected = set()
 
-        for item in items:
-            available_listbox.insert(tk.END, item)
+        def _populate_available(data):
+            available_text.configure(state="normal")
+            available_text.delete("1.0", "end")
+            for item in data:
+                available_text.insert("end", item + "\n")
+            # Подсветка уже выбранных
+            _left_selected.clear()
+            for i, item in enumerate(data, 1):
+                if item in selected_items:
+                    available_text.tag_add("chosen", f"{i}.0", f"{i}.0 lineend")
+            available_text.tag_config("chosen", background="#d0e8ff", foreground="#1a5276")
+            available_text.configure(state="disabled")
+
+        _populate_available(items)
 
         # === Правая колонка: выбранные ===
-        right_frame = ctk.CTkFrame(columns_frame, fg_color="transparent")
+        right_frame = ctk.CTkFrame(columns_frame, fg_color=_tc("card_bg"),
+                                    border_width=1, border_color=_tc("card_border"),
+                                    corner_radius=8)
         right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(5, 0))
 
-        ctk.CTkLabel(right_frame, text="Выбранные:", font=("Arial", 12, "bold"),
-                      text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 5))
+        ctk.CTkLabel(right_frame, text="Выбранные:", font=("Segoe UI", 12, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, padx=8, pady=(8, 5))
 
-        right_list_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
-        right_list_frame.pack(fill=tk.BOTH, expand=True, pady=(35, 0))
+        selected_text = ctk.CTkTextbox(right_frame, wrap="none", height=250,
+                                        fg_color=_tc("input_bg"),
+                                        text_color=_tc("text_primary"))
+        selected_text.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+        selected_text.configure(cursor="hand2")
 
-        selected_listbox = tk.Listbox(
-            right_list_frame, bg=lb_bg, fg=lb_fg, font=("Arial", 10),
-            height=12, selectbackground="#c0392b", selectforeground="white",
-            activestyle="none"
-        )
-        right_scroll = ctk.CTkScrollbar(right_list_frame, command=selected_listbox.yview)
-        right_scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        selected_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        selected_listbox.configure(yscrollcommand=right_scroll.set)
+        # Индекс выбранной строки в правом списке
+        _right_sel_line = [0]
 
-        for item in selected_items:
-            selected_listbox.insert(tk.END, item)
+        def _populate_selected():
+            selected_text.configure(state="normal")
+            selected_text.delete("1.0", "end")
+            for item in selected_items:
+                selected_text.insert("end", item + "\n")
+            selected_text.configure(state="disabled")
+
+        _populate_selected()
+
+        # Клик по левому списку — подсветка
+        def _on_left_click(event):
+            try:
+                index = available_text.index(f"@{event.x},{event.y}")
+                line = available_text.get(f"{index} linestart", f"{index} lineend").strip()
+                line_num = int(index.split('.')[0])
+                if line:
+                    available_text.configure(state="normal")
+                    available_text.tag_remove("selected", "1.0", "end")
+                    available_text.tag_add("selected", f"{line_num}.0", f"{line_num}.0 lineend")
+                    available_text.tag_config("selected", background="#d0e8ff", foreground="#1a5276")
+                    available_text.configure(state="disabled")
+                    _left_selected.clear()
+                    _left_selected.add(line)
+            except (tk.TclError, ValueError):
+                pass
+
+        available_text.bind("<Button-1>", _on_left_click)
+
+        # Клик по правому списку — подсветка
+        def _on_right_click(event):
+            try:
+                index = selected_text.index(f"@{event.x},{event.y}")
+                line = selected_text.get(f"{index} linestart", f"{index} lineend").strip()
+                line_num = int(index.split('.')[0])
+                if line:
+                    selected_text.configure(state="normal")
+                    selected_text.tag_remove("selected", "1.0", "end")
+                    selected_text.tag_add("selected", f"{line_num}.0", f"{line_num}.0 lineend")
+                    selected_text.tag_config("selected", background="#d0e8ff", foreground="#1a5276")
+                    selected_text.configure(state="disabled")
+                    _right_sel_line[0] = line_num
+            except (tk.TclError, ValueError):
+                pass
+
+        selected_text.bind("<Button-1>", _on_right_click)
 
         # Фильтрация
         def filter_list(*args):
             search_text = search_var.get().lower()
-            available_listbox.delete(0, tk.END)
             if search_text:
                 filtered = [item for item in items if search_text in item.lower()]
-                for item in filtered:
-                    available_listbox.insert(tk.END, item)
                 count_label.configure(text=f"({len(filtered)}/{len(items)})", text_color="blue")
             else:
-                for item in items:
-                    available_listbox.insert(tk.END, item)
+                filtered = items
                 count_label.configure(text=f"({len(items)})", text_color="gray")
+            _populate_available(filtered)
 
         search_var.trace('w', filter_list)
 
@@ -1166,7 +1212,7 @@ class NodeCreationDialog:
         status_label = ctk.CTkLabel(
             frame,
             text=f"Выбрано: {len(selected_items)}" if selected_items else "Выбрано: 0",
-            font=("Arial", 11, "bold"),
+            font=("Segoe UI", 11, "bold"),
             text_color="green" if selected_items else "gray"
         )
 
@@ -1178,35 +1224,31 @@ class NodeCreationDialog:
 
         # Кнопки
         def add_selected():
-            selection = available_listbox.curselection()
-            for idx in selection:
-                item = available_listbox.get(idx)
-                if item not in selected_items:
+            for item in list(_left_selected):
+                if item and item not in selected_items:
                     selected_items.append(item)
-                    selected_listbox.insert(tk.END, item)
+            _left_selected.clear()
+            _populate_selected()
+            filter_list()  # обновить подсветку в левом
             update_status()
 
         def remove_selected():
-            selection = selected_listbox.curselection()
-            for idx in sorted(selection, reverse=True):
-                item = selected_listbox.get(idx)
-                if item in selected_items:
-                    selected_items.remove(item)
-                selected_listbox.delete(idx)
-            update_status()
+            line_num = _right_sel_line[0]
+            if 1 <= line_num <= len(selected_items):
+                selected_items.pop(line_num - 1)
+                _right_sel_line[0] = 0
+                _populate_selected()
+                filter_list()
+                update_status()
 
         btn_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        btn_frame.pack(fill=tk.X, pady=(10, 0))
+        btn_frame.pack(fill=tk.X, padx=8, pady=(10, 8))
 
         ctk.CTkButton(btn_frame, text="Добавить >>", command=add_selected,
                       width=120, height=30).pack(side=tk.LEFT, padx=5)
         ctk.CTkButton(btn_frame, text="<< Удалить", command=remove_selected,
                       width=120, height=30, fg_color="#c0392b", hover_color="#e74c3c").pack(side=tk.LEFT, padx=5)
 
-        status_label.pack(side=tk.RIGHT, padx=10)
-        btn_frame.tkraise()  # Ensure buttons are above status
-
-        status_label.pack_forget()
         status_label.pack(in_=btn_frame, side=tk.RIGHT, padx=10)
 
     # ========================================================================
@@ -1264,12 +1306,12 @@ class NodeCreationDialog:
         header.pack(fill=tk.X, padx=16, pady=(12, 4))
         ctk.CTkLabel(
             header, text="🔌 Сетевые порты",
-            font=("Arial", 15, "bold"), text_color=text_primary, anchor="w"
+            font=("Segoe UI", 15, "bold"), text_color=text_primary, anchor="w"
         ).pack(side=tk.LEFT)
         ctk.CTkLabel(
             header,
             text="IP, MAC, VLAN и роли Wi-Fi",
-            font=("Arial", 10), text_color=text_muted, anchor="w"
+            font=("Segoe UI", 10), text_color=text_muted, anchor="w"
         ).pack(side=tk.LEFT, padx=(12, 0))
 
         # Сабконтейнеры прозрачные — чтобы не было разнотонности
@@ -1284,7 +1326,7 @@ class NodeCreationDialog:
         add_frame.pack(fill=tk.X, padx=16, pady=(8, 10))
 
         ctk.CTkLabel(add_frame, text="Добавить порт:",
-                      font=("Arial", 12, "bold"), text_color=text_primary).pack(side=tk.LEFT, padx=(0, 10))
+                      font=("Segoe UI", 12, "bold"), text_color=text_primary).pack(side=tk.LEFT, padx=(0, 10))
 
         self.new_port_type = tk.StringVar(value="ethernet")
 
@@ -1299,7 +1341,7 @@ class NodeCreationDialog:
             add_frame, text="➕ Добавить",
             command=self.add_new_port, width=110, height=32,
             fg_color=primary, hover_color=primary_hover,
-            corner_radius=8, font=("Arial", 12, "bold")
+            corner_radius=8, font=("Segoe UI", 12, "bold")
         ).pack(side=tk.RIGHT)
 
         # Кнопка тестовых данных
@@ -1309,7 +1351,7 @@ class NodeCreationDialog:
             test_frame, text="🧪 Тестовые данные",
             command=self.fill_test_data, width=160, height=32,
             fg_color=accent, hover_color=accent_hover,
-            corner_radius=8, font=("Arial", 12)
+            corner_radius=8, font=("Segoe UI", 12)
         ).pack(side=tk.RIGHT)
 
         canvas.pack(side="left", fill="both", expand=True)
@@ -1338,25 +1380,25 @@ class NodeCreationDialog:
         usb_ports = [p for p in self.current_ports if p["port_type"] == "usb"]
 
         if eth_ports:
-            ctk.CTkLabel(self.ports_container, text="🔌 RJ45 порты:", font=("Arial", 11, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(self.ports_container, text="🔌 RJ45 порты:", font=("Segoe UI", 11, "bold")).pack(anchor=tk.W,
                                                                                                       pady=(5, 2))
             for port in eth_ports:
                 self.create_port_widget(port)
 
         if pon_ports:
-            ctk.CTkLabel(self.ports_container, text="🔆 PON порты:", font=("Arial", 11, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(self.ports_container, text="🔆 PON порты:", font=("Segoe UI", 11, "bold")).pack(anchor=tk.W,
                                                                                                      pady=(10, 2))
             for port in pon_ports:
                 self.create_port_widget(port)
 
         if wifi_ports:
-            ctk.CTkLabel(self.ports_container, text="📶 Wi-Fi порты:", font=("Arial", 11, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(self.ports_container, text="📶 Wi-Fi порты:", font=("Segoe UI", 11, "bold")).pack(anchor=tk.W,
                                                                                                        pady=(10, 2))
             for port in wifi_ports:
                 self.create_wifi_port_widget(port)
 
         if usb_ports:
-            ctk.CTkLabel(self.ports_container, text="🔌 USB порты:", font=("Arial", 11, "bold")).pack(anchor=tk.W,
+            ctk.CTkLabel(self.ports_container, text="🔌 USB порты:", font=("Segoe UI", 11, "bold")).pack(anchor=tk.W,
                                                                                                      pady=(10, 2))
             for port in usb_ports:
                 self.create_port_widget(port, show_network=False)
@@ -1388,10 +1430,10 @@ class NodeCreationDialog:
 
             ctk.CTkEntry(frame, textvariable=mac_var, width=120, placeholder_text="MAC", **_inp).pack(side=tk.LEFT, padx=2)
             ctk.CTkEntry(frame, textvariable=ip_var, width=110, placeholder_text="IP", **_inp).pack(side=tk.LEFT, padx=2)
-            ctk.CTkLabel(frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+            ctk.CTkLabel(frame, text="/", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
             ctk.CTkEntry(frame, textvariable=mask_var, width=50, placeholder_text="маска", **_inp).pack(side=tk.LEFT,
                                                                                                 padx=(2, 5))
-            ctk.CTkLabel(frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
+            ctk.CTkLabel(frame, text="|", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=2)
             ctk.CTkEntry(frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN", **_inp).pack(side=tk.LEFT, padx=2)
             ctk.CTkComboBox(frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90,
                             fg_color=_tc("input_bg"), border_color=_tc("input_border"),
@@ -1453,10 +1495,10 @@ class NodeCreationDialog:
 
         ctk.CTkEntry(fields_frame, textvariable=mac_var, width=120, placeholder_text="MAC", **_inp).pack(side=tk.LEFT, padx=2)
         ctk.CTkEntry(fields_frame, textvariable=ip_var, width=110, placeholder_text="IP", **_inp).pack(side=tk.LEFT, padx=2)
-        ctk.CTkLabel(fields_frame, text="/", font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        ctk.CTkLabel(fields_frame, text="/", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT)
         ctk.CTkEntry(fields_frame, textvariable=mask_var, width=50, placeholder_text="маска", **_inp).pack(side=tk.LEFT,
                                                                                                    padx=(2, 5))
-        ctk.CTkLabel(fields_frame, text="|", font=("Arial", 12, "bold")).pack(side=tk.LEFT, padx=2)
+        ctk.CTkLabel(fields_frame, text="|", font=("Segoe UI", 12, "bold")).pack(side=tk.LEFT, padx=2)
         ctk.CTkEntry(fields_frame, textvariable=vlan_id_var, width=60, placeholder_text="VLAN", **_inp).pack(side=tk.LEFT,
                                                                                                      padx=2)
         ctk.CTkComboBox(fields_frame, values=["untagged", "tagged"], variable=vlan_mode_var, width=90,

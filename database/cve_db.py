@@ -560,8 +560,9 @@ class CVEDatabase:
     # =================================================================
 
     def get_cves_for_component(self, vendor: str,
-                                product: str = None) -> List[Dict]:
-        """Ищет CVE для vendor+product через JOIN."""
+                                product: str = None,
+                                version: str = None) -> List[Dict]:
+        """Ищет CVE для vendor+product+version через JOIN."""
         cursor = self._connection.cursor()
 
         query = """
@@ -575,6 +576,9 @@ class CVEDatabase:
         if product:
             query += " AND p.product LIKE ?"
             params.append(f"%{product.lower()}%")
+        if version:
+            query += " AND (p.version LIKE ? OR p.version = '*' OR p.version = '-')"
+            params.append(f"%{version.lower()}%")
         query += " LIMIT 200"
 
         cursor.execute(query, params)
@@ -588,6 +592,72 @@ class CVEDatabase:
             }
             for r in cursor.fetchall()
         ]
+
+    def smart_search_cves(self, component_name: str) -> List[Dict]:
+        """Умный поиск CVE: разбивает название компонента на слова,
+        ищет совпадения vendor+product в CPE-таблице напрямую.
+
+        Стратегия (от точного к широкому):
+        1. Все слова (>=3 букв) как AND по vendor/product
+        2. Первые 2 значимых слова
+        3. Первое слово как vendor
+        """
+        import re as _re
+        # Убираем русские префиксы
+        for pfx in ("Процессор: ", "Видеоконтроллер: ", "Материнская плата: ",
+                     "HDD/SSD: ", "Память: ", "ОС: ", "Приложение: ",
+                     "Мышь: ", "Клавиатура: ", "Принтер: ", "Монитор: "):
+            if component_name.startswith(pfx):
+                component_name = component_name[len(pfx):]
+                break
+
+        # Извлекаем значимые слова (>=3 символов, без цифро-буквенного мусора)
+        words = [w.lower().replace("-", "_") for w in component_name.split()
+                 if len(w) >= 2 and not _re.match(r'^\d+[a-z]*$', w.lower())]
+        if not words:
+            words = [component_name.lower().replace(" ", "_")]
+
+        cursor = self._connection.cursor()
+        base = """
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+            FROM cve_entries c
+            JOIN cve_cpe_map m ON c.cve_id = m.cve_id
+            JOIN cpe_entries p ON m.cpe_id = p.id
+            WHERE """
+
+        def _fetch(where, params):
+            cursor.execute(base + where + " LIMIT 200", params)
+            return [{
+                "cve_id": r["cve_id"], "cvss_v2": r["cvss_v2"],
+                "cvss_v3": r["cvss_v3"], "cvss_v4": r["cvss_v4"],
+                "cwe_id": r["cwe_id"] or "",
+            } for r in cursor.fetchall()]
+
+        # Стратегия 1: vendor = слово1, product содержит слово2
+        if len(words) >= 2:
+            results = _fetch(
+                "p.vendor LIKE ? AND p.product LIKE ?",
+                [f"%{words[0]}%", f"%{words[1]}%"]
+            )
+            if results:
+                return results
+
+        # Стратегия 2: product содержит первые 2 слова (через AND)
+        if len(words) >= 2:
+            results = _fetch(
+                "(p.vendor LIKE ? OR p.product LIKE ?) AND p.product LIKE ?",
+                [f"%{words[0]}%", f"%{words[0]}%", f"%{words[1]}%"]
+            )
+            if results:
+                return results
+
+        # Стратегия 3: vendor = первое слово
+        if words:
+            results = _fetch("p.vendor LIKE ?", [f"%{words[0]}%"])
+            if results:
+                return results
+
+        return []
 
     def get_cves_by_cpe_mask(self, keyword: str) -> List[Dict]:
         """Ищет CVE по ключевому слову в vendor или product."""

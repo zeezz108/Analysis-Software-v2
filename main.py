@@ -41,14 +41,14 @@ def show_splash_and_load(on_complete):
     # Название программы (единственная надпись сверху)
     ctk.CTkLabel(
         splash, text=APP_TITLE,
-        font=("Arial", 60, "bold"), text_color="#e0e0e0",
+        font=("Segoe UI", 60, "bold"), text_color="#e0e0e0",
         wraplength=screen_w - 40, justify="center"
     ).pack(pady=(400, 400))
 
     # Процент загрузки вместо описательного статуса
     status_label = ctk.CTkLabel(
         splash, text="0%",
-        font=("Arial", 20, "bold"), text_color="#ffffff"
+        font=("Segoe UI", 20, "bold"), text_color="#ffffff"
     )
     status_label.pack(pady=(0, 10))
 

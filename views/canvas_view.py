@@ -172,8 +172,8 @@ class CanvasView:
         """Возвращает кортеж шрифта с размером, скорректированным под текущий зум."""
         size = max(6, int(round(base_size * self.zoom)))
         if weight and weight != "normal":
-            return ("Arial", size, weight)
-        return ("Arial", size)
+            return ("Segoe UI", size, weight)
+        return ("Segoe UI", size)
 
     def update_scrollregion(self) -> None:
         """Обновляет область прокрутки холста под текущий зум."""
@@ -288,14 +288,14 @@ class CanvasView:
         y = (dialog.winfo_screenheight() - 200) // 2
         dialog.geometry(f"300x200+{x}+{y}")
 
-        ctk.CTkLabel(dialog, text="Настройки сетки", font=("Arial", 16, "bold")).pack(pady=(15, 10))
+        ctk.CTkLabel(dialog, text="Настройки сетки", font=("Segoe UI", 16, "bold")).pack(pady=(15, 10))
 
         enabled_var = tk.BooleanVar(value=self.grid_enabled)
         ctk.CTkCheckBox(dialog, text="Привязка к сетке включена", variable=enabled_var).pack(pady=5)
 
         size_frame = ctk.CTkFrame(dialog, fg_color="transparent")
         size_frame.pack(pady=10)
-        ctk.CTkLabel(size_frame, text="Шаг сетки (px):", font=("Arial", 12)).pack(side=tk.LEFT, padx=5)
+        ctk.CTkLabel(size_frame, text="Шаг сетки (px):", font=("Segoe UI", 12)).pack(side=tk.LEFT, padx=5)
         size_var = tk.StringVar(value=str(self.grid_size))
         ctk.CTkEntry(size_frame, textvariable=size_var, width=60).pack(side=tk.LEFT, padx=5)
 
@@ -336,9 +336,9 @@ class CanvasView:
         y = (dialog.winfo_screenheight() - 250) // 2
         dialog.geometry(f"350x250+{x}+{y}")
 
-        ctk.CTkLabel(dialog, text="Масштаб интерфейса", font=("Arial", 16, "bold")).pack(pady=(15, 5))
+        ctk.CTkLabel(dialog, text="Масштаб интерфейса", font=("Segoe UI", 16, "bold")).pack(pady=(15, 5))
         ctk.CTkLabel(dialog, text="Выберите масштаб отображения элементов",
-                     font=("Arial", 11), text_color="gray").pack(pady=(0, 10))
+                     font=("Segoe UI", 11), text_color="gray").pack(pady=(0, 10))
 
         current_scale = load_user_scale()
         scale_var = tk.StringVar(value=current_scale)
@@ -349,7 +349,7 @@ class CanvasView:
         combo.pack(pady=10)
 
         info_label = ctk.CTkLabel(dialog, text="Изменение вступит в силу после перезапуска",
-                                  font=("Arial", 10), text_color="gray")
+                                  font=("Segoe UI", 10), text_color="gray")
         info_label.pack(pady=(0, 10))
 
         def apply_scale():
@@ -466,57 +466,69 @@ class CanvasView:
         brand.pack(fill=tk.X, padx=18, pady=(20, 4))
         ctk.CTkLabel(
             brand, text="⬢  АС ЦКБ",
-            font=("Arial", 20, "bold"),
+            font=("Segoe UI", 20, "bold"),
             text_color=theme.color("primary"),
             anchor="w",
         ).pack(fill=tk.X)
         ctk.CTkLabel(
             brand,
             text="Автоматизированная система\nпостроения цифровых карт\nбезопасности",
-            font=("Arial", 9),
+            font=("Segoe UI", 9),
             text_color=theme.color("text_secondary"),
             justify="left",
             anchor="w",
         ).pack(fill=tk.X, pady=(2, 14))
 
-        # --- Секции с кнопками ---
+        # --- Сворачиваемые секции ---
+        sec_file = self._make_collapsible_section(control_frame, "ФАЙЛ", expanded=False)
+        self.btn_save = self._make_sidebar_button(
+            sec_file, "💾  Сохранить схему", self.save_topology, variant="primary"
+        )
+        self.btn_load = self._make_sidebar_button(
+            sec_file, "📂  Открыть схему", self.load_topology, variant="primary"
+        )
+        self.btn_test_topology = self._make_sidebar_button(
+            sec_file, "🧪  Тестовая схема", self.build_test_topology, variant="primary"
+        )
+
+        sec_elem = self._make_collapsible_section(control_frame, "СОЗДАНИЕ", expanded=False)
         self.btn_add_zone = self._make_sidebar_button(
-            control_frame, "🗂  Структура РИС", self.start_zone_creation, variant="primary"
+            sec_elem, "🗂  Структура РИС", self.start_zone_creation, variant="primary"
         )
         self.btn_add_node = self._make_sidebar_button(
-            control_frame, "➕  Добавить узел", self.show_add_node_dialog, variant="primary"
+            sec_elem, "➕  Добавить узел", self.show_add_node_dialog, variant="primary"
         )
 
-        self._sidebar_section_label(control_frame, "СОЕДИНЕНИЯ")
+        sec_conn = self._make_collapsible_section(control_frame, "СОЕДИНЕНИЯ", expanded=False)
         self.btn_create_link = self._make_sidebar_button(
-            control_frame, "🔗  Создать связь", self.toggle_create_link_mode, variant="primary"
+            sec_conn, "🔗  Создать связь", self.toggle_create_link_mode, variant="primary"
         )
         self.btn_delete_link = self._make_sidebar_button(
-            control_frame, "✂  Удалить связь", self.toggle_delete_link_mode, variant="primary"
+            sec_conn, "✂  Удалить связь", self.toggle_delete_link_mode, variant="primary"
         )
 
-        self._sidebar_section_label(control_frame, "ДЕЙСТВИЯ")
+        sec_actions = self._make_collapsible_section(control_frame, "ДЕЙСТВИЯ", expanded=False)
         self.btn_delete = self._make_sidebar_button(
-            control_frame, "🗑  Удалить выбранное", self.delete_selected, variant="danger"
+            sec_actions, "🗑  Удалить выбранное", self.delete_selected, variant="danger"
         )
         self.btn_clear = self._make_sidebar_button(
-            control_frame, "⟲  Очистить всё", self.clear_all, variant="danger"
+            sec_actions, "⟲  Очистить всё", self.clear_all, variant="danger"
         )
 
-        self._sidebar_section_label(control_frame, "АНАЛИЗ")
+        sec_analysis = self._make_collapsible_section(control_frame, "АНАЛИЗ", expanded=False)
         self.btn_connectivity = self._make_sidebar_button(
-            control_frame, "📊  Анализ связности", self.show_connectivity_report, variant="accent"
+            sec_analysis, "📊  Анализ связности", self.show_connectivity_report, variant="primary"
         )
         self.btn_osi_decomposition = self._make_sidebar_button(
-            control_frame, "🔬  Схема ЭМВОС", self.show_osi_decomposition, variant="accent"
+            sec_analysis, "🔬  Схема ЭМВОС", self.show_osi_decomposition, variant="primary"
         )
 
-        self._sidebar_section_label(control_frame, "НАСТРОЙКИ")
+        sec_settings = self._make_collapsible_section(control_frame, "НАСТРОЙКИ", expanded=False)
         self.btn_grid = self._make_sidebar_button(
-            control_frame, "⊞  Настройки сетки", self.show_grid_settings, variant="ghost"
+            sec_settings, "⊞  Настройки сетки", self.show_grid_settings, variant="primary"
         )
         self.btn_scale = self._make_sidebar_button(
-            control_frame, "⇔  Масштаб интерфейса", self.show_scale_settings, variant="ghost"
+            sec_settings, "⇔  Масштаб интерфейса", self.show_scale_settings, variant="primary"
         )
 
         # Список кнопок для временной блокировки (изолированный режим зоны)
@@ -533,7 +545,7 @@ class CanvasView:
 
         # --- Статус-текст (если понадобится) ---
         self.status_label = ctk.CTkLabel(
-            control_frame, text="", font=("Arial", 9),
+            control_frame, text="", font=("Segoe UI", 9),
             text_color=theme.color("text_muted"), anchor="w"
         )
         self.status_label.pack(fill=tk.X, padx=18, pady=(0, 4))
@@ -593,7 +605,7 @@ class CanvasView:
             self.canvas,
             text=f"{int(round(self.zoom * 100))}%",
             bg=zoom_bg, fg=zoom_fg,
-            font=("Arial", 10, "bold"),
+            font=("Segoe UI", 10, "bold"),
             bd=1, relief=tk.SOLID, padx=8, pady=3
         )
         self.zoom_label.place(relx=1.0, rely=1.0, anchor="se", x=-14, y=-14)
@@ -620,10 +632,48 @@ class CanvasView:
         from utils import theme
         ctk.CTkLabel(
             parent, text=text,
-            font=("Arial", 9, "bold"),
+            font=("Segoe UI", 9, "bold"),
             text_color=theme.color("text_muted"),
             anchor="w",
         ).pack(fill=tk.X, padx=18, pady=(14, 4))
+
+    def _make_collapsible_section(self, parent, title: str, expanded: bool = False):
+        """Создаёт сворачиваемую секцию в sidebar. Возвращает frame для кнопок."""
+        from utils import theme
+
+        is_open = [expanded]
+        arrow = ["▼" if expanded else "▶"]
+
+        # Контейнер для кнопок
+        content = ctk.CTkFrame(parent, fg_color="transparent")
+
+        def toggle():
+            is_open[0] = not is_open[0]
+            if is_open[0]:
+                arrow[0] = "▼"
+                content.pack(fill=tk.X, after=header)
+            else:
+                arrow[0] = "▶"
+                content.pack_forget()
+            header.configure(text=f" {arrow[0]}  {title}")
+
+        header = ctk.CTkButton(
+            parent, text=f" {arrow[0]}  {title}",
+            command=toggle,
+            font=("Segoe UI", 14, "bold"),
+            anchor="w",
+            height=36,
+            corner_radius=6,
+            fg_color="transparent",
+            hover_color=theme.color("ghost_hover"),
+            text_color=theme.color("text_primary"),
+        )
+        header.pack(fill=tk.X, padx=8, pady=(10, 0))
+
+        if expanded:
+            content.pack(fill=tk.X, after=header)
+
+        return content
 
     def _make_sidebar_button(self, parent, text: str, command, variant: str = "primary"):
         """Создаёт кнопку sidebar с единым стилем.
@@ -660,8 +710,8 @@ class CanvasView:
         btn = ctk.CTkButton(
             parent, text=text, command=command,
             fg_color=fg, hover_color=hover, text_color=text_color,
-            font=("Arial", 12),
-            corner_radius=8, height=36, anchor="w",
+            font=("Segoe UI", 13),
+            corner_radius=8, height=38, anchor="w",
         )
         btn.pack(fill=tk.X, padx=14, pady=3)
         return btn
@@ -718,7 +768,7 @@ class CanvasView:
 
         # Заголовок
         ctk.CTkLabel(main, text="Инструкция: Как создать новую зону TIM",
-                      font=("Arial", 16, "bold"), text_color=color("text_primary"),
+                      font=("Segoe UI", 16, "bold"), text_color=color("text_primary"),
                       anchor="w").pack(fill=tk.X, pady=(0, 20))
 
         # --- 4 шага в горизонтальном ряду ---
@@ -742,10 +792,10 @@ class CanvasView:
                                    fg_color=color("primary"), corner_radius=18)
             circle.pack(pady=(0, 8))
             circle.pack_propagate(False)
-            ctk.CTkLabel(circle, text=num, font=("Arial", 14, "bold"),
+            ctk.CTkLabel(circle, text=num, font=("Segoe UI", 14, "bold"),
                           text_color="#FFFFFF").pack(expand=True)
 
-            ctk.CTkLabel(step_frame, text=text, font=("Arial", 11),
+            ctk.CTkLabel(step_frame, text=text, font=("Segoe UI", 11),
                           text_color=color("text_secondary"),
                           justify="center", wraplength=140).pack()
 
@@ -756,14 +806,14 @@ class CanvasView:
         self.dont_show_var = tk.BooleanVar(value=False)
         ctk.CTkSwitch(bottom, text="Не показывать эту подсказку в будущем",
                        variable=self.dont_show_var,
-                       font=("Arial", 11), text_color=color("text_muted")).pack(side=tk.LEFT)
+                       font=("Segoe UI", 11), text_color=color("text_muted")).pack(side=tk.LEFT)
 
         ctk.CTkButton(
             bottom, text="Понятно",
             command=lambda: self.close_hint_window(hint_window),
             fg_color=color("success"), hover_color=color("success_hover"),
             text_color="#FFFFFF", width=120, height=38,
-            corner_radius=10, font=("Arial", 13, "bold")
+            corner_radius=10, font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT)
 
         style_dialog(hint_window, width=660, height=280)
@@ -796,7 +846,7 @@ class CanvasView:
         header.pack(fill=tk.X, padx=15, pady=(10, 5))
 
         ctk.CTkLabel(header, text="Матрица Сетевой Связности",
-                      font=("Arial", 18, "bold"),
+                      font=("Segoe UI", 18, "bold"),
                       text_color=theme.color("text_primary")).pack(side=tk.LEFT)
 
         # Легенда
@@ -811,15 +861,15 @@ class CanvasView:
             lf = ctk.CTkFrame(legend_frame, fg_color="transparent")
             lf.pack(side=tk.LEFT, padx=8)
             ctk.CTkFrame(lf, width=14, height=14, fg_color=color, corner_radius=3).pack(side=tk.LEFT, padx=(0, 4))
-            ctk.CTkLabel(lf, text=text, font=("Arial", 10)).pack(side=tk.LEFT)
+            ctk.CTkLabel(lf, text=text, font=("Segoe UI", 10)).pack(side=tk.LEFT)
 
         # Таблица через Treeview
         tree_frame = ctk.CTkFrame(report_window)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
 
         style = ttk.Style()
-        style.configure("Connectivity.Treeview", font=("Arial", 10), rowheight=28)
-        style.configure("Connectivity.Treeview.Heading", font=("Arial", 10, "bold"))
+        style.configure("Connectivity.Treeview", font=("Segoe UI", 10), rowheight=28)
+        style.configure("Connectivity.Treeview.Heading", font=("Segoe UI", 10, "bold"))
 
         columns = ("source", "target", "status", "reason")
         tree = ttk.Treeview(tree_frame, columns=columns, show="headings",
@@ -881,7 +931,7 @@ class CanvasView:
             f"Прямых: {direct_count}  |  Маршрутов: {routed_count}  |  "
             f"VPN: {vpn_count}  |  Заблокировано: {blocked_count}  |  Нет связи: {none_count}"
         )
-        ctk.CTkLabel(stats_frame, text=stats_text, font=("Arial", 11)).pack(side=tk.LEFT)
+        ctk.CTkLabel(stats_frame, text=stats_text, font=("Segoe UI", 11)).pack(side=tk.LEFT)
 
     def cancel_zone_creation(self, hint_window):
         """Отменяет режим создания зоны и закрывает окно инструкции."""
@@ -965,13 +1015,13 @@ class CanvasView:
                 main_frame = ctk.CTkFrame(subtype_dialog)
                 main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-                ctk.CTkLabel(main_frame, text="Выберите тип сервера:", font=("Arial", 14, "bold")).pack(pady=(0, 15))
+                ctk.CTkLabel(main_frame, text="Выберите тип сервера:", font=("Segoe UI", 14, "bold")).pack(pady=(0, 15))
 
                 subtype_var = tk.StringVar(value="hypervisor")
                 ctk.CTkRadioButton(main_frame, text="Гипервизор (VMware, Hyper-V, ...)", variable=subtype_var,
-                                   value="hypervisor", font=("Arial", 12)).pack(anchor=tk.W, pady=5)
+                                   value="hypervisor", font=("Segoe UI", 12)).pack(anchor=tk.W, pady=5)
                 ctk.CTkRadioButton(main_frame, text="Контейнер (Docker, LXC, ...)", variable=subtype_var,
-                                   value="container", font=("Arial", 12)).pack(anchor=tk.W, pady=5)
+                                   value="container", font=("Segoe UI", 12)).pack(anchor=tk.W, pady=5)
 
                 btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
                 btn_frame.pack(fill=tk.X, pady=(15, 0))
@@ -1596,7 +1646,7 @@ class CanvasView:
         title_lbl = tk.Label(
             self.zone_edit_overlay,
             text=f"Редактирование размера зоны: {zone.get_display_text()}",
-            font=("Arial", 10, "bold"),
+            font=("Segoe UI", 10, "bold"),
             bg="#ffffff", fg="#333333",
         )
         title_lbl.pack(side=tk.TOP, padx=10, pady=(6, 2))
@@ -1605,13 +1655,13 @@ class CanvasView:
         btns_row.pack(side=tk.BOTTOM, padx=10, pady=(2, 6))
         save_btn = tk.Button(
             btns_row, text="✔ Сохранить", command=self._zone_edit_save,
-            bg="#4CAF50", fg="white", font=("Arial", 10, "bold"),
+            bg="#4CAF50", fg="white", font=("Segoe UI", 10, "bold"),
             padx=10, pady=3, bd=0, activebackground="#3FA043",
         )
         save_btn.pack(side=tk.LEFT, padx=4)
         cancel_btn = tk.Button(
             btns_row, text="✕ Отмена", command=self._zone_edit_cancel,
-            bg="#CD3333", fg="white", font=("Arial", 10),
+            bg="#CD3333", fg="white", font=("Segoe UI", 10),
             padx=10, pady=3, bd=0, activebackground="#B52929",
         )
         cancel_btn.pack(side=tk.LEFT, padx=4)
@@ -1744,6 +1794,78 @@ class CanvasView:
         else:
             messagebox.showinfo("Информация", "Сначала выберите узел или зону для удаления.")
 
+    def duplicate_node(self, node):
+        """Дублирует узел с той же конфигурацией, но новым ID и именем."""
+        import copy
+        from models.node import Node
+        from utils.generators import uid
+
+        # Генерируем новое имя с инкрементом номера
+        base_name = node.name
+        # Убираем trailing число: "АРМ-Офис" → "АРМ-Офис", "АРМ2" → "АРМ"
+        import re
+        m = re.match(r'^(.*?)(\d+)$', base_name)
+        if m:
+            prefix, num = m.group(1), int(m.group(2))
+        else:
+            prefix, num = base_name + " ", 1
+
+        # Ищем следующий свободный номер
+        existing_names = {n.name for n in self.board.nodes}
+        while True:
+            num += 1
+            new_name = f"{prefix}{num}"
+            if new_name not in existing_names:
+                break
+
+        # Смещение позиции
+        ox, oy = node.position
+        new_pos = (ox + 80, oy + 80)
+
+        new_node = Node(
+            id=uid(),
+            type=node.type,
+            name=new_name,
+            zone=node.zone,
+            position=new_pos,
+            size=node.size,
+        )
+
+        # Копируем конфигурацию
+        new_node.properties = copy.deepcopy(node.properties)
+        # Убираем кеш паспорта — у нового узла свой
+        new_node.properties.pop("security_passport_cache", None)
+        new_node.ports = copy.deepcopy(node.ports)
+        # Новые port_id, рандомные адреса, сброс соединений
+        import random
+        for p in new_node.ports:
+            p["port_id"] = uid()
+            p["connected_to"] = None
+            p["connected_to_ap"] = None
+            p.pop("connected_clients", None)
+            p["mac_address"] = ":".join(f"{random.randint(0,255):02X}" for _ in range(6))
+            if p.get("ip_address"):
+                parts = p["ip_address"].rsplit(".", 1)
+                if len(parts) == 2:
+                    p["ip_address"] = f"{parts[0]}.{random.randint(20, 250)}"
+
+        # VPN
+        new_node.vpn_client_enabled = node.vpn_client_enabled
+        new_node.vpn_client_server_ip = node.vpn_client_server_ip
+        new_node.vpn_client_port = node.vpn_client_port
+        new_node.vpn_client_tunnel_ip = node.vpn_client_tunnel_ip
+        new_node.vpn_client_protocol = node.vpn_client_protocol
+        new_node.vpn_server_enabled = node.vpn_server_enabled
+        new_node.vpn_server_tunnel_ips = list(node.vpn_server_tunnel_ips)
+        new_node.vpn_server_port = node.vpn_server_port
+        new_node.vpn_server_protocol = node.vpn_server_protocol
+
+        # Фаервол
+        new_node.firewall_enabled = node.firewall_enabled
+
+        self.board.add_node(new_node)
+        self.redraw()
+
     def clear_all(self):
         if messagebox.askyesno("Очистка всего", "Вы уверены, что хотите удалить все зоны, узлы и соединения?"):
             self.board.zones.clear()
@@ -1755,6 +1877,199 @@ class CanvasView:
             self.board.create_free_zone()
             self.redraw()
 
+    # ====================================================================
+    # Сохранение / загрузка топологии
+    # ====================================================================
+
+    _RECENT_FILE = os.path.join("config", "recent_topologies.json")
+
+    def save_topology(self):
+        """Сохраняет текущую топологию в JSON-файл."""
+        from tkinter import filedialog
+        import json
+
+        filepath = filedialog.asksaveasfilename(
+            title="Сохранить схему",
+            defaultextension=".json",
+            filetypes=[("Файлы топологии", "*.json"), ("Все файлы", "*.*")],
+        )
+        if not filepath:
+            return
+
+        try:
+            data = self.board.to_dict()
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._add_recent(filepath)
+            messagebox.showinfo("Сохранение", f"Схема сохранена:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}")
+
+    def load_topology(self):
+        """Открывает топологию из JSON-файла или из списка недавних."""
+        from tkinter import filedialog
+        import json
+
+        # Собираем недавние
+        recent = self._get_recent()
+
+        if recent:
+            # Диалог с выбором: открыть файл или из недавних
+            menu = tk.Menu(self.root, tearoff=0)
+            menu.add_command(label="📂  Выбрать файл...",
+                             command=lambda: self._load_from_file())
+            menu.add_separator()
+            for path in recent:
+                short = os.path.basename(path)
+                menu.add_command(label=f"📄  {short}",
+                                 command=lambda p=path: self._load_from_path(p))
+            try:
+                menu.tk_popup(
+                    self.root.winfo_pointerx(),
+                    self.root.winfo_pointery()
+                )
+            except Exception:
+                self._load_from_file()
+        else:
+            self._load_from_file()
+
+    def _load_from_file(self):
+        from tkinter import filedialog
+        filepath = filedialog.askopenfilename(
+            title="Открыть схему",
+            filetypes=[("Файлы топологии", "*.json"), ("Все файлы", "*.*")],
+        )
+        if filepath:
+            self._load_from_path(filepath)
+
+    def _load_from_path(self, filepath):
+        import json
+        if not os.path.exists(filepath):
+            messagebox.showerror("Ошибка", f"Файл не найден:\n{filepath}")
+            return
+        try:
+            with open(filepath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.board.load_from_dict(data)
+            self._add_recent(filepath)
+            self.selected_node_id = None
+            self.selected_zone_id = None
+            self.redraw()
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить:\n{e}")
+
+    def _get_recent(self):
+        import json
+        try:
+            with open(self._RECENT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+
+    def _add_recent(self, filepath):
+        import json
+        recent = self._get_recent()
+        filepath = os.path.abspath(filepath)
+        if filepath in recent:
+            recent.remove(filepath)
+        recent.insert(0, filepath)
+        recent = recent[:5]
+        os.makedirs(os.path.dirname(self._RECENT_FILE), exist_ok=True)
+        try:
+            with open(self._RECENT_FILE, "w", encoding="utf-8") as f:
+                json.dump(recent, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def build_test_topology(self):
+        """Создаёт тестовую топологию: Интернет → Маршрутизатор → [АРМ1, АРМ2, Сервер]."""
+        if self.board.nodes:
+            if not messagebox.askyesno(
+                "Тестовая схема",
+                "На схеме уже есть элементы. Очистить и создать тестовую топологию?"
+            ):
+                return
+            self.board.zones.clear()
+            self.board.nodes.clear()
+            self.board.links.clear()
+            self.board.create_free_zone()
+
+        from models.zone import Zone
+        from models.node import Node
+        from config.presets import (
+            PRESET_INTERNET, PRESET_ROUTER,
+            PRESET_ARM_OFFICE, PRESET_ARM_DEVELOPER, PRESET_SERVER,
+            apply_preset,
+        )
+        from utils.generators import uid
+
+        # --- Зоны ---
+        free_zone = next(z for z in self.board.zones if z.zone_type == "free")
+        tim_zone = Zone(
+            id=uid(), name="",
+            x=500, y=100, width=1100, height=700,
+            zone_type="tim", zone_subtype="ТИМ1 - ЛВС", zone_number=1,
+            description="",
+        )
+        self.board.add_zone(tim_zone)
+
+        # --- Узлы ---
+        internet = Node(id=uid(), type="Internet", name="Интернет",
+                        zone=free_zone, position=(150, 350))
+        apply_preset(internet, PRESET_INTERNET)
+
+        router = Node(id=uid(), type="Router", name="Маршрутизатор",
+                      zone=tim_zone, position=(580, 350))
+        apply_preset(router, PRESET_ROUTER)
+
+        arm1 = Node(id=uid(), type="ARM", name="АРМ-Офис",
+                    zone=tim_zone, position=(900, 150))
+        apply_preset(arm1, PRESET_ARM_OFFICE)
+
+        arm2 = Node(id=uid(), type="ARM", name="АРМ-Разработчик",
+                    zone=tim_zone, position=(900, 400))
+        apply_preset(arm2, PRESET_ARM_DEVELOPER)
+
+        server = Node(id=uid(), type="Server", name="Сервер",
+                      zone=tim_zone, position=(900, 650))
+        apply_preset(server, PRESET_SERVER)
+
+        for n in [internet, router, arm1, arm2, server]:
+            self.board.add_node(n)
+
+        # --- Связи (каждая использует свободный ethernet-порт) ---
+        used_ports = set()  # (node_id, port_id)
+
+        def next_eth_port(node):
+            for p in node.ports:
+                key = (node.id, p["port_id"])
+                if p.get("port_type") == "ethernet" and key not in used_ports:
+                    return p["port_id"]
+            return None
+
+        pairs = [
+            (internet, router),
+            (router, arm1),
+            (router, arm2),
+            (router, server),
+        ]
+        for a, b in pairs:
+            pa = next_eth_port(a)
+            pb = next_eth_port(b)
+            if pa and pb:
+                used_ports.add((a.id, pa))
+                used_ports.add((b.id, pb))
+                self.board.add_link(a.id, b.id, {
+                    "type": "p2p",
+                    "port_a": pa,
+                    "port_b": pb,
+                    "link_type": "ethernet",
+                })
+
+        self.selected_node_id = None
+        self.selected_zone_id = None
+        self.redraw()
+
     def get_node_type_russian(self, node_type_en: str) -> str:
         return NODE_TYPE_RUSSIAN.get(node_type_en, node_type_en)
 
@@ -1765,10 +2080,26 @@ class CanvasView:
 
         z_scale = self.zoom
 
+        # --- Фоновая сетка (клеточки на всё полотно) ---
+        grid_step = 30
+        grid_color = theme.c("divider")
+        total_w = 4000
+        total_h = 3000
+        step_px = max(4, grid_step * z_scale)
+        if step_px >= 6:
+            pw = int(total_w * z_scale)
+            ph = int(total_h * z_scale)
+            for gx in range(0, int(pw / step_px) + 2):
+                px = gx * step_px
+                self.canvas.create_line(px, 0, px, ph, fill=grid_color, width=1)
+            for gy in range(0, int(ph / step_px) + 2):
+                py = gy * step_px
+                self.canvas.create_line(0, py, pw, py, fill=grid_color, width=1)
+
         # Актуальные цвета под текущую тему (важно — пересчитывается на
         # каждом redraw, чтобы переключение темы применилось немедленно).
         zone_fill = theme.c("surface_alt")
-        zone_outline = theme.c("divider")
+        zone_outline = theme.c("card_sel_brd")
         text_primary = theme.c("text_primary")
         text_secondary = theme.c("text_secondary")
         node_label_color = theme.c("text_primary")
@@ -1780,6 +2111,17 @@ class CanvasView:
             x1, y1, x2, y2 = self.w2c(wx1), self.w2c(wy1), self.w2c(wx2), self.w2c(wy2)
             self.canvas.create_rectangle(x1, y1, x2, y2, outline=zone_outline,
                                           fill=zone_fill, width=2)
+
+            # Клеточки внутри зоны
+            if step_px >= 6:
+                for gx in range(int(x1 / step_px), int(x2 / step_px) + 1):
+                    px = gx * step_px
+                    if x1 < px < x2:
+                        self.canvas.create_line(px, y1, px, y2, fill=grid_color, width=1)
+                for gy in range(int(y1 / step_px), int(y2 / step_px) + 1):
+                    py = gy * step_px
+                    if y1 < py < y2:
+                        self.canvas.create_line(x1, py, x2, py, fill=grid_color, width=1)
 
             # Названия зон в мировых размерах (пропорционально самой зоне)
             main_text = z.get_display_text()

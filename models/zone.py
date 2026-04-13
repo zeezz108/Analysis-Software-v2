@@ -302,11 +302,52 @@ class Board:
             node_id: ID удаляемого узла
         """
         # Удаляем все связи, связанные с узлом
-        links_to_remove = [l for l in self.links if l.a.id == node_id or l.b.id == node_id]
-        for link in links_to_remove:
-            self.remove_link(link.id)
+        self.links = [l for l in self.links if l.a.id != node_id and l.b.id != node_id]
 
         self.nodes = [n for n in self.nodes if n.id != node_id]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Сериализует всю доску в словарь."""
+        return {
+            "zones": [z.to_dict() for z in self.zones],
+            "nodes": [n.to_dict() for n in self.nodes],
+            "links": [l.to_dict() for l in self.links],
+        }
+
+    def load_from_dict(self, data: Dict[str, Any]) -> None:
+        """Восстанавливает доску из словаря."""
+        from models.node import Node as _Node
+        from models.link import Link as _Link
+
+        self.zones.clear()
+        self.nodes.clear()
+        self.links.clear()
+
+        # Зоны
+        zones_dict = {}
+        for zd in data.get("zones", []):
+            zone = Zone.from_dict(zd)
+            self.zones.append(zone)
+            zones_dict[zone.id] = zone
+        self.create_free_zone()
+        # Добавляем free_zone в словарь
+        for z in self.zones:
+            if z.id not in zones_dict:
+                zones_dict[z.id] = z
+
+        # Узлы
+        nodes_dict = {}
+        for nd in data.get("nodes", []):
+            node = _Node.from_dict(nd, zones_dict)
+            if node:
+                self.nodes.append(node)
+                nodes_dict[node.id] = node
+
+        # Связи
+        for ld in data.get("links", []):
+            link = _Link.from_dict(ld, nodes_dict)
+            if link:
+                self.links.append(link)
 
     def find_node(self, node_id: str) -> Optional['Node']:
         """
