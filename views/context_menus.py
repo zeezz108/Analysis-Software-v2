@@ -100,6 +100,10 @@ class NodeContextMenuHandler:
                 label="🛡 Паспорт безопасности",
                 command=lambda: canvas_view.show_node_security_passport(node)
             )
+            menu.add_command(
+                label="⚔️ Паттерны атак (CAPEC)",
+                command=lambda: canvas_view.show_node_capec(node)
+            )
 
         # Управление ВМ (только для сервера виртуализации)
         if node.type == "VirtualizationServer":

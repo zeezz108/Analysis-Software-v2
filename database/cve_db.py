@@ -683,3 +683,214 @@ class CVEDatabase:
             }
             for r in cursor.fetchall()
         ]
+
+    # =================================================================
+    # ИЕРАРХИЧЕСКИЙ CPE-БРАУЗЕР: vendor → product → version
+    # =================================================================
+
+    def get_vendors(self, part: str = None, vendors_filter: list = None,
+                    search: str = "") -> List[str]:
+        """Возвращает список вендоров.
+
+        Args:
+            part: фильтр по типу CPE ('h', 'o', 'a')
+            vendors_filter: ограничить только этими вендорами
+            search: поиск по подстроке
+        """
+        conditions = []
+        params = []
+
+        if part:
+            conditions.append("part = ?")
+            params.append(part)
+
+        if vendors_filter:
+            placeholders = ",".join("?" * len(vendors_filter))
+            conditions.append(f"vendor IN ({placeholders})")
+            params.extend(vendors_filter)
+
+        where = " AND ".join(conditions) if conditions else "1=1"
+
+        query = f"""
+            SELECT DISTINCT vendor
+            FROM cpe_entries
+            WHERE {where}
+            ORDER BY vendor
+        """
+
+        cursor = self._connection.cursor()
+        cursor.execute(query, params)
+        result = [r[0] for r in cursor.fetchall()]
+
+        if search:
+            search_lower = search.lower()
+            result = [v for v in result if search_lower in v.lower()]
+
+        return result
+
+    def get_product_families(self, vendor: str, part: str = None,
+                             family_prefixes: List[tuple] = None) -> List[tuple]:
+        """Возвращает семейства продуктов для вендора.
+
+        Args:
+            vendor: вендор
+            part: фильтр типа CPE
+            family_prefixes: список (display_name, prefix) — если задан,
+                             проверяет наличие продуктов с каждым префиксом в БД
+
+        Returns:
+            Список кортежей (display_name, prefix, count) для семейств с продуктами.
+        """
+        if not family_prefixes:
+            return []
+
+        cursor = self._connection.cursor()
+        result = []
+
+        for display_name, prefix in family_prefixes:
+            conditions = ["vendor = ?", "product LIKE ?"]
+            params = [vendor, f"{prefix}%"]
+            if part:
+                conditions.append("part = ?")
+                params.append(part)
+
+            query = f"SELECT COUNT(DISTINCT product) FROM cpe_entries WHERE {' AND '.join(conditions)}"
+            cursor.execute(query, params)
+            count = cursor.fetchone()[0]
+            if count > 0:
+                result.append((display_name, prefix, count))
+
+        return result
+
+    def get_products_by_prefix(self, vendor: str, prefix: str,
+                                part: str = None, search: str = "",
+                                product_like: list = None,
+                                product_not_like: list = None) -> List[str]:
+        """Возвращает продукты вендора, начинающиеся с prefix."""
+        conditions = ["vendor = ?", "product LIKE ?"]
+        params = [vendor, f"{prefix}%"]
+
+        if part:
+            conditions.append("part = ?")
+            params.append(part)
+
+        if product_like:
+            like_clauses = " OR ".join(["product LIKE ?" for _ in product_like])
+            conditions.append(f"({like_clauses})")
+            params.extend([f"%{p}%" for p in product_like])
+
+        if product_not_like:
+            for ex in product_not_like:
+                conditions.append("product NOT LIKE ?")
+                params.append(f"%{ex}%")
+
+        query = f"""
+            SELECT DISTINCT product FROM cpe_entries
+            WHERE {' AND '.join(conditions)}
+            ORDER BY product
+        """
+        cursor = self._connection.cursor()
+        cursor.execute(query, params)
+        result = [r[0] for r in cursor.fetchall()]
+
+        if search:
+            sl = search.lower()
+            result = [p for p in result if sl in p.lower()]
+        return result
+
+    def get_products(self, vendor: str, part: str = None,
+                     search: str = "",
+                     product_like: list = None,
+                     product_not_like: list = None) -> List[str]:
+        """Возвращает список продуктов для выбранного вендора."""
+        conditions = ["vendor = ?"]
+        params = [vendor]
+
+        if part:
+            conditions.append("part = ?")
+            params.append(part)
+
+        if product_like:
+            like_clauses = " OR ".join(["product LIKE ?" for _ in product_like])
+            conditions.append(f"({like_clauses})")
+            params.extend([f"%{p}%" for p in product_like])
+
+        if product_not_like:
+            for ex in product_not_like:
+                conditions.append("product NOT LIKE ?")
+                params.append(f"%{ex}%")
+
+        where = " AND ".join(conditions)
+
+        query = f"""
+            SELECT DISTINCT product
+            FROM cpe_entries
+            WHERE {where}
+            ORDER BY product
+        """
+
+        cursor = self._connection.cursor()
+        cursor.execute(query, params)
+        result = [r[0] for r in cursor.fetchall()]
+
+        if search:
+            search_lower = search.lower()
+            result = [p for p in result if search_lower in p.lower()]
+
+        return result
+
+    def get_versions(self, vendor: str, product: str,
+                     search: str = "") -> List[str]:
+        """Возвращает список версий для выбранного вендора и продукта."""
+        query = """
+            SELECT DISTINCT version
+            FROM cpe_entries
+            WHERE vendor = ? AND product = ?
+            ORDER BY version
+        """
+
+        cursor = self._connection.cursor()
+        cursor.execute(query, [vendor, product])
+        result = [r[0] for r in cursor.fetchall()
+                  if r[0] and r[0] not in ('*', '-')]
+
+        if search:
+            search_lower = search.lower()
+            result = [v for v in result if search_lower in v.lower()]
+
+        return result
+
+    def get_cves_exact(self, vendor: str, product: str,
+                       version: str = None) -> List[Dict]:
+        """Ищет CVE по точному совпадению CPE (vendor + product + version).
+
+        В отличие от get_cves_for_component, использует = вместо LIKE.
+        """
+        cursor = self._connection.cursor()
+
+        query = """
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+            FROM cve_entries c
+            JOIN cve_cpe_map m ON c.cve_id = m.cve_id
+            JOIN cpe_entries p ON m.cpe_id = p.id
+            WHERE p.vendor = ? AND p.product = ?
+        """
+        params = [vendor.lower(), product.lower()]
+
+        if version:
+            query += " AND (p.version = ? OR p.version = '*' OR p.version = '-')"
+            params.append(version.lower())
+
+        query += " LIMIT 500"
+
+        cursor.execute(query, params)
+        return [
+            {
+                "cve_id": r["cve_id"],
+                "cvss_v2": r["cvss_v2"],
+                "cvss_v3": r["cvss_v3"],
+                "cvss_v4": r["cvss_v4"],
+                "cwe_id": r["cwe_id"] or "",
+            }
+            for r in cursor.fetchall()
+        ]

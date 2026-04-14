@@ -13,6 +13,7 @@ import customtkinter as ctk
 import threading
 import time
 import uuid
+from utils.theme import center_window
 from typing import Dict, List, Optional, Any, Tuple
 
 from models.zone import Zone
@@ -249,9 +250,7 @@ class NodeCreationDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     # ========================================================================
     # ЗАГРУЗКА ДАННЫХ
@@ -881,6 +880,20 @@ class NodeCreationDialog:
             pass
         return tv
 
+    def _create_tab_widget(self, frame, config):
+        """Выбирает виджет: CPE-браузер если есть cpe_filter, иначе старый список."""
+        if "cpe_filter" in config:
+            current_value = None
+            if self.is_edit_mode:
+                current_value = self.get_current_selection_for_tab({"var_name": config["var_name"]})
+            self.create_cpe_browser(frame, config, current_value)
+        else:
+            items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
+            if config.get("multiple", False):
+                self.create_multi_select_combo(frame, config["title"], items, config["var_name"])
+            else:
+                self.create_paginated_combo(frame, config["title"], items, config["var_name"])
+
     def create_hardware_tabs(self, parent, hardware_configs):
         """Создаёт вкладки аппаратного обеспечения."""
         if len(hardware_configs) > 1:
@@ -888,18 +901,9 @@ class NodeCreationDialog:
             for config in hardware_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
-                items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-                if config.get("multiple", False):
-                    self.create_multi_select_combo(frame, config["title"], items, config["var_name"])
-                else:
-                    self.create_paginated_combo(frame, config["title"], items, config["var_name"])
+                self._create_tab_widget(frame, config)
         else:
-            config = hardware_configs[0]
-            items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-            if config.get("multiple", False):
-                self.create_multi_select_combo(parent, config["title"], items, config["var_name"])
-            else:
-                self.create_paginated_combo(parent, config["title"], items, config["var_name"])
+            self._create_tab_widget(parent, hardware_configs[0])
 
     def create_software_tabs(self, parent, software_configs):
         """Создаёт вкладки программного обеспечения."""
@@ -908,18 +912,9 @@ class NodeCreationDialog:
             for config in software_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
-                items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-                if config.get("multiple", False):
-                    self.create_multi_select_combo(frame, config["title"], items, config["var_name"])
-                else:
-                    self.create_paginated_combo(frame, config["title"], items, config["var_name"])
+                self._create_tab_widget(frame, config)
         else:
-            config = software_configs[0]
-            items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-            if config.get("multiple", False):
-                self.create_multi_select_combo(parent, config["title"], items, config["var_name"])
-            else:
-                self.create_paginated_combo(parent, config["title"], items, config["var_name"])
+            self._create_tab_widget(parent, software_configs[0])
 
     def create_peripheral_tabs(self, parent, peripheral_configs):
         """Создаёт вкладки периферийных устройств."""
@@ -934,6 +929,274 @@ class NodeCreationDialog:
             config = peripheral_configs[0]
             items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
             self.create_paginated_combo(parent, config["title"], items, config["var_name"])
+
+    def create_cpe_browser(self, parent, config, current_value=None):
+        """Создаёт иерархический CPE-браузер.
+
+        Поддерживает:
+        - Семейства (families) → 4 уровня: Vendor → Family → Model → Version
+        - Без семейств → 3 уровня: Vendor → Product → Version
+        - multiple=True → мультивыбор с кнопкой "Добавить" и списком выбранных
+        - Ленивая загрузка для табов без vendors_filter (не грузить 34K вендоров)
+        """
+        from utils.theme import color as _tc
+        from utils.styled_dropdown import StyledDropdown
+
+        var_name = config["var_name"]
+        title = config["title"]
+        cpe_filter = config["cpe_filter"]
+        part = cpe_filter.get("part")
+        vendors_filter = cpe_filter.get("vendors")
+        families_map = cpe_filter.get("families")
+        p_like = cpe_filter.get("product_like")
+        p_not_like = cpe_filter.get("product_not_like")
+        has_families = bool(families_map)
+        is_multiple = config.get("multiple", False)
+
+        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
+                              border_width=2, border_color=_tc("primary"),
+                              corner_radius=10)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),
+                      text_color=_tc("text_primary")).pack(anchor=tk.W, padx=12, pady=(10, 12))
+
+        # Для single-select: одна переменная
+        # Для multi-select: список выбранных + переменная текущего выбора
+        if is_multiple:
+            selected_items = []
+            # Загрузить ранее выбранные при редактировании
+            if self.is_edit_mode:
+                existing = self.get_current_selection_for_tab(
+                    {"var_name": var_name, "multiple": True})
+                if isinstance(existing, list):
+                    selected_items.extend(existing)
+                elif existing:
+                    selected_items.append(existing)
+            var = tk.StringVar()
+            setattr(self, f"{var_name}_var", var)
+            setattr(self, f"{var_name}_selected_items", selected_items)
+        else:
+            var = tk.StringVar(value=current_value if current_value else "")
+            setattr(self, f"{var_name}_var", var)
+
+        cpe_state = {"vendor": "", "family_prefix": "", "product": "", "version": ""}
+
+        def _make_step(parent_frame, label_text):
+            sf = ctk.CTkFrame(parent_frame, fg_color="transparent")
+            ctk.CTkLabel(sf, text=label_text, font=("Segoe UI", 12, "bold"),
+                          text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 4))
+            v = tk.StringVar()
+            cb = StyledDropdown(sf, variable=v)
+            cb.pack(fill=tk.X)
+            cl = ctk.CTkLabel(sf, text="", font=("Segoe UI", 10), text_color=_tc("text_muted"))
+            cl.pack(anchor=tk.W, pady=(2, 0))
+            return sf, v, cb, cl
+
+        # --- Контейнер шагов ---
+        steps_container = ctk.CTkFrame(frame, fg_color="transparent")
+        steps_container.pack(fill=tk.X, padx=12, pady=(0, 4))
+
+        # === 1. Производитель ===
+        vendor_f, vendor_var, vendor_cb, vendor_hint = _make_step(steps_container, "1. Производитель")
+        vendor_f.pack(fill=tk.X, pady=(0, 6))
+
+        # === 2-4. Семейство / Продукт / Версия ===
+        if has_families:
+            family_f, family_var, family_cb, family_cnt = _make_step(steps_container, "2. Семейство")
+            product_f, product_var, product_cb, product_cnt = _make_step(steps_container, "3. Модель")
+            version_f, version_var, version_cb, version_cnt = _make_step(steps_container, "4. Версия")
+        else:
+            family_f = family_var = family_cb = family_cnt = None
+            product_f, product_var, product_cb, product_cnt = _make_step(steps_container, "2. Продукт")
+            version_f, version_var, version_cb, version_cnt = _make_step(steps_container, "3. Версия")
+
+        # === Нижняя панель ===
+        bottom = ctk.CTkFrame(frame, fg_color="transparent")
+        bottom.pack(fill=tk.BOTH, expand=True, padx=12, pady=(4, 10))
+
+        if is_multiple:
+            # --- Кнопка "Добавить" + строка текущего выбора ---
+            add_row = ctk.CTkFrame(bottom, fg_color="transparent")
+            add_row.pack(fill=tk.X, pady=(0, 6))
+
+            selected_label = ctk.CTkLabel(add_row, text="не выбрано",
+                                           font=("Segoe UI", 11),
+                                           text_color=_tc("text_muted"))
+            selected_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            add_btn = ctk.CTkButton(add_row, text="＋ Добавить", width=100, height=28,
+                                     fg_color=_tc("primary"), hover_color=_tc("primary_hover"),
+                                     text_color="#FFFFFF")
+            add_btn.pack(side=tk.RIGHT, padx=(8, 0))
+
+            # --- Список выбранных ---
+            ctk.CTkLabel(bottom, text="Выбранные компоненты:",
+                          font=("Segoe UI", 11, "bold"),
+                          text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(4, 2))
+
+            items_scroll = ctk.CTkScrollableFrame(bottom, fg_color=_tc("input_bg"),
+                                                    height=120)
+            items_scroll.pack(fill=tk.BOTH, expand=True)
+
+            def _refresh_items_list():
+                for w in items_scroll.winfo_children():
+                    w.destroy()
+                for idx, item in enumerate(selected_items):
+                    row = ctk.CTkFrame(items_scroll, fg_color="transparent")
+                    row.pack(fill=tk.X, pady=1)
+                    ctk.CTkLabel(row, text=f"• {item}", font=("Segoe UI", 11),
+                                  text_color=_tc("text_primary"),
+                                  anchor="w").pack(side=tk.LEFT, fill=tk.X, expand=True)
+                    ctk.CTkButton(row, text="✕", width=24, height=24,
+                                   fg_color=_tc("ghost_bg"),
+                                   hover_color=_tc("danger"),
+                                   text_color=_tc("text_primary"),
+                                   command=lambda i=idx: _remove_item(i)).pack(side=tk.RIGHT)
+
+            def _remove_item(idx):
+                if 0 <= idx < len(selected_items):
+                    selected_items.pop(idx)
+                    _refresh_items_list()
+
+            def _add_current():
+                display = var.get().strip()
+                if display and display not in selected_items:
+                    selected_items.append(display)
+                    _refresh_items_list()
+                    # Сбросить выбор для следующего добавления
+                    _clear_selection()
+
+            add_btn.configure(command=_add_current)
+            _refresh_items_list()
+        else:
+            # --- Single select: просто "Выбрано: ..." ---
+            sel_row = ctk.CTkFrame(bottom, fg_color="transparent")
+            sel_row.pack(fill=tk.X)
+
+            ctk.CTkLabel(sel_row, text="Выбрано:", font=("Segoe UI", 12, "bold"),
+                          text_color=_tc("text_primary")).pack(side=tk.LEFT, padx=(0, 8))
+            selected_label = ctk.CTkLabel(sel_row,
+                                           text=current_value if current_value else "не выбрано",
+                                           font=("Segoe UI", 12),
+                                           text_color="#22C55E" if current_value else _tc("text_muted"))
+            selected_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+            ctk.CTkButton(sel_row, text="✕ Сбросить", width=80, height=28,
+                           fg_color=_tc("ghost_bg"), hover_color=_tc("ghost_hover"),
+                           text_color=_tc("text_primary"),
+                           command=lambda: _clear_selection()).pack(side=tk.RIGHT)
+
+        def _show_step(step_frame):
+            if not step_frame.winfo_manager():
+                step_frame.pack(fill=tk.X, pady=(0, 6))
+
+        def _hide_from(level):
+            if level <= 2 and family_f:
+                family_f.pack_forget()
+            if level <= 3:
+                product_f.pack_forget()
+            if level <= 4:
+                version_f.pack_forget()
+
+        def _clear_selection():
+            var.set("")
+            vendor_var.set("")
+            if family_var:
+                family_var.set("")
+            product_var.set("")
+            version_var.set("")
+            cpe_state.update({"vendor": "", "family_prefix": "", "product": "", "version": ""})
+            _hide_from(2)
+            selected_label.configure(text="не выбрано", text_color=_tc("text_muted"))
+
+        def _update_display():
+            v, p, ver = cpe_state["vendor"], cpe_state["product"], cpe_state["version"]
+            if v and p:
+                display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
+                if ver:
+                    display += f" {ver}"
+                var.set(display)
+                selected_label.configure(text=display, text_color="#22C55E")
+
+        # --- Загрузка вендоров ---
+        vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
+        vendor_cb.configure(values=vendors)
+
+        def _on_vendor(*_):
+            vendor = vendor_var.get().strip()
+            if not vendor:
+                return
+            cpe_state.update({"vendor": vendor, "family_prefix": "", "product": "", "version": ""})
+            if family_var:
+                family_var.set("")
+            product_var.set("")
+            version_var.set("")
+            _hide_from(2)
+
+            if has_families and vendor in families_map:
+                fam_list = families_map[vendor]
+                fam_data = self.db.get_product_families(vendor, part=part, family_prefixes=fam_list)
+                display_values = [f"{name} ({cnt})" for name, prefix, cnt in fam_data]
+                self._family_map = {f"{name} ({cnt})": prefix for name, prefix, cnt in fam_data}
+                family_cb.configure(values=display_values)
+                family_cnt.configure(text=f"{len(fam_data)} семейств")
+                _show_step(family_f)
+            else:
+                products = self.db.get_products(vendor, part=part,
+                                                 product_like=p_like, product_not_like=p_not_like)
+                product_cb.configure(values=products)
+                product_cnt.configure(text=f"{len(products)} продуктов")
+                _show_step(product_f)
+
+        def _on_family(*_):
+            if not family_var:
+                return
+            selected = family_var.get().strip()
+            if not selected:
+                return
+            prefix = getattr(self, '_family_map', {}).get(selected, "")
+            if not prefix:
+                return
+            cpe_state.update({"family_prefix": prefix, "product": "", "version": ""})
+            product_var.set("")
+            version_var.set("")
+            version_f.pack_forget()
+
+            products = self.db.get_products_by_prefix(cpe_state["vendor"], prefix, part=part,
+                                                       product_like=p_like, product_not_like=p_not_like)
+            product_cb.configure(values=products)
+            product_cnt.configure(text=f"{len(products)} моделей")
+            _show_step(product_f)
+
+        def _on_product(*_):
+            product = product_var.get().strip()
+            vendor = cpe_state["vendor"]
+            if not product or not vendor:
+                return
+            cpe_state.update({"product": product, "version": ""})
+            version_var.set("")
+
+            versions = self.db.get_versions(vendor, product)
+            version_cb.configure(values=versions)
+            version_cnt.configure(text=f"{len(versions)} версий")
+            if versions:
+                _show_step(version_f)
+            else:
+                version_f.pack_forget()
+            _update_display()
+
+        def _on_version(*_):
+            version = version_var.get().strip()
+            if version:
+                cpe_state["version"] = version
+                _update_display()
+
+        vendor_var.trace("w", _on_vendor)
+        if family_var:
+            family_var.trace("w", _on_family)
+        product_var.trace("w", _on_product)
+        version_var.trace("w", _on_version)
 
     def create_paginated_combo(self, parent, title, items, var_name, current_value=None):
         """Создаёт комбобокс с поиском и пагинацией."""
@@ -1703,6 +1966,7 @@ class NodeCreationDialog:
             properties["software"] = list(self._preset_applied.get("software", []))
         else:
             # Иначе — собираем из вкладок через _var переменные
+            node_config = NODE_CONFIG.get(node_type_en, {})
             hardware_items = []
             software_items = []
 
@@ -1724,28 +1988,50 @@ class NodeCreationDialog:
                     if not value or not isinstance(value, str) or not value.strip():
                         continue
 
-                    if "processor" in attr_name or "cpu" in attr_name:
-                        hardware_items.append(f"Процессор: {value}")
-                    elif "gpu" in attr_name and "driver" not in attr_name:
-                        hardware_items.append(f"Видеоконтроллер: {value}")
-                    elif "motherboard" in attr_name:
-                        hardware_items.append(f"Материнская плата: {value}")
-                    elif "hdd" in attr_name or "storage" in attr_name:
-                        hardware_items.append(f"HDD/SSD: {value}")
-                    elif "mouse" in attr_name:
-                        software_items.append(f"Мышь: {value}")
-                    elif "keyboard" in attr_name:
-                        software_items.append(f"Клавиатура: {value}")
-                    elif "printer" in attr_name:
-                        software_items.append(f"Принтер: {value}")
-                    elif "monitor" in attr_name:
-                        software_items.append(f"Монитор: {value}")
-                    elif "os" in attr_name:
-                        software_items.append(f"ОС: {value}")
-                    elif "app" in attr_name:
-                        software_items.append(f"Приложение: {value}")
+                    # Определяем prefix из конфига если доступен
+                    base = attr_name.replace('_var', '')
+                    saved = False
 
-                # Множественный выбор
+                    # Ищем prefix в конфиге
+                    for grp in ['hardware_tabs', 'software_tabs', 'peripheral_tabs',
+                                'driver_tabs', 'hypervisor_tabs', 'host_os_tabs',
+                                'containerizer_tabs', 'guest_os_tabs']:
+                        for tc in node_config.get(grp, []):
+                            if tc.get("var_name") == base and tc.get("prefix"):
+                                pfx = tc["prefix"]
+                                if grp in ('hardware_tabs',):
+                                    hardware_items.append(f"{pfx}: {value}")
+                                else:
+                                    software_items.append(f"{pfx}: {value}")
+                                saved = True
+                                break
+                        if saved:
+                            break
+
+                    if not saved:
+                        # Fallback на старую логику
+                        if "processor" in attr_name or "cpu" in attr_name:
+                            hardware_items.append(f"Процессор: {value}")
+                        elif "gpu" in attr_name and "driver" not in attr_name:
+                            hardware_items.append(f"Видеоконтроллер: {value}")
+                        elif "motherboard" in attr_name:
+                            hardware_items.append(f"Материнская плата: {value}")
+                        elif "hdd" in attr_name or "storage" in attr_name:
+                            hardware_items.append(f"HDD/SSD: {value}")
+                        elif "mouse" in attr_name:
+                            software_items.append(f"Мышь: {value}")
+                        elif "keyboard" in attr_name:
+                            software_items.append(f"Клавиатура: {value}")
+                        elif "printer" in attr_name:
+                            software_items.append(f"Принтер: {value}")
+                        elif "monitor" in attr_name:
+                            software_items.append(f"Монитор: {value}")
+                        elif "os" in attr_name:
+                            software_items.append(f"ОС: {value}")
+                        elif "app" in attr_name:
+                            software_items.append(f"Приложение: {value}")
+
+                # Множественный выбор (старый формат _selected)
                 if attr_name.endswith('_selected') and not attr_name.startswith('_'):
                     selected_list = getattr(self, attr_name, None)
                     if isinstance(selected_list, list):
@@ -1755,6 +2041,26 @@ class NodeCreationDialog:
                                     software_items.append(f"Приложение: {value}")
                                 else:
                                     software_items.append(value)
+
+                # Множественный выбор (CPE-браузер _selected_items)
+                if attr_name.endswith('_selected_items') and not attr_name.startswith('_'):
+                    selected_list = getattr(self, attr_name, None)
+                    if isinstance(selected_list, list):
+                        for value in selected_list:
+                            if not value:
+                                continue
+                            # Определяем prefix по var_name
+                            base = attr_name.replace('_selected_items', '')
+                            if "app" in base or "software" in base:
+                                software_items.append(f"Приложение: {value}")
+                            elif "storage" in base or "hdd" in base:
+                                hardware_items.append(f"HDD/SSD: {value}")
+                            elif "nic" in base or "network" in base:
+                                hardware_items.append(f"Сетевой адаптер: {value}")
+                            elif "cpu" in base or "processor" in base:
+                                hardware_items.append(f"Процессор: {value}")
+                            else:
+                                software_items.append(value)
 
             properties["hardware"] = hardware_items
             properties["software"] = software_items

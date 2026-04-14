@@ -19,3 +19,5 @@ database/cve_db_v1_backup.py
 Promts/
 config/scaling.json
 config/theme.json
+config/recent_topologies.json
+schemes/

@@ -3,12 +3,40 @@
 Точка входа в программу
 """
 
+import ctypes
 import customtkinter as ctk
 from tkinter import messagebox
 import tkinter as tk
 import threading
 import os
 import sys
+
+# Объявляем приложение как Per-Monitor DPI Aware (Windows 10+).
+# Без этого системные диалоги (filedialog) рисуются с мелким шрифтом
+# на экранах с высоким разрешением (например, 3200x2000 при 200% масштабе).
+if sys.platform == "win32":
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()  # fallback для Windows 8
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Глобальный патч бага Python 3.13 + Tkinter:
+# При закрытии CTkToplevel Tkinter вызывает deletecommand(), но
+# _tclCommands уже None → AttributeError. Патчим один раз навсегда.
+# ---------------------------------------------------------------------------
+_original_deletecommand = tk.Misc.deletecommand
+
+def _safe_deletecommand(self, name):
+    if self._tclCommands is None:
+        return
+    _original_deletecommand(self, name)
+
+tk.Misc.deletecommand = _safe_deletecommand
 
 
 APP_TITLE = ("Автоматизированная система "

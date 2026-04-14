@@ -185,16 +185,35 @@ def load_icon(name: str, size: Tuple[int, int] = (20, 20)):
 # Утилита для стилизации диалоговых окон (общий фон + центрирование)
 # ---------------------------------------------------------------------------
 
+def center_window(window, width: int, height: int) -> None:
+    """Центрирует окно по центру экрана. Работает на любом разрешении.
+
+    CustomTkinter при window_scaling > 1 умножает координаты из geometry()
+    на коэффициент масштабирования, поэтому передаваемые x/y нужно
+    предварительно разделить на этот коэффициент.
+    """
+    window.update_idletasks()
+    screen_w = window.winfo_screenwidth()
+    screen_h = window.winfo_screenheight()
+
+    # CTk scaling: geometry() координаты умножаются на window_scaling
+    try:
+        scale = ctk.ScalingTracker.get_window_scaling(window)
+    except Exception:
+        scale = 1.0
+
+    # width/height — логические; CTk умножает их на scale → реальный размер
+    real_w = width * scale
+    real_h = height * scale
+    x = int((screen_w - real_w) / 2 / scale)
+    y = int((screen_h - real_h) / 2 / scale)
+    window.geometry(f"{width}x{height}+{x}+{y}")
+
+
 def style_dialog(dialog, width: int = 500, height: int = 400) -> None:
     """Применяет единый стиль к CTkToplevel-диалогу:
     - фон dialog_bg
-    - фиксированный размер, центрирование на экране
-    - corner_radius=0 (чтобы рамка не обрезалась)
+    - центрирование относительно родителя или экрана
     """
     dialog.configure(fg_color=color("dialog_bg"))
-    dialog.update_idletasks()
-    screen_w = dialog.winfo_screenwidth()
-    screen_h = dialog.winfo_screenheight()
-    x = (screen_w - width) // 2
-    y = (screen_h - height) // 2
-    dialog.geometry(f"{width}x{height}+{x}+{y}")
+    center_window(dialog, width, height)

@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from models.node import Node
 from models.zone import Board
 from utils.validators import validate_ip, validate_mask
+from utils.theme import center_window
 
 
 # Список поддерживаемых VPN-протоколов.
@@ -49,7 +50,7 @@ class VPNConfigDialog:
         self.dialog.geometry("1100x640")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         self.create_widgets()
         self.center_window()
@@ -69,9 +70,7 @@ class VPNConfigDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def create_widgets(self):
         """Создаёт основной интерфейс диалога (промт-стиль2 — тёмная палитра)."""

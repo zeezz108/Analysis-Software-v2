@@ -21,6 +21,7 @@ from models.firewall import FirewallManager
 from database.cve_db import CVEDatabase
 from utils.cache import DataCache
 from utils.validators import validate_ip, validate_mac, validate_mask, validate_vlan_id
+from utils.theme import center_window
 from utils.generators import generate_test_ip, generate_test_mac, generate_test_mask
 from config.node_config import NODE_CONFIG, get_node_type_russian
 from dialogs.routing_dialog import RoutingTableDialog
@@ -64,7 +65,7 @@ class PropertiesDialog:
 
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран — можно открывать несколько окон
 
         if isinstance(element, Node):
             self.current_ports = [port.copy() for port in self.element.ports]
@@ -99,9 +100,7 @@ class PropertiesDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def load_from_cache(self):
         """Загружает данные из кэша."""
@@ -226,16 +225,20 @@ class PropertiesDialog:
         properties = self.element.properties
         var_name = tab_config["var_name"]
 
-        component_mapping = {
-            "processor": "Процессор", "gpu": "Видеоконтроллер",
-            "motherboard": "Материнская плата", "hdd": "HDD/SSD",
-            "server_ram": "Оперативная память", "os": "ОС", "server_os": "ОС",
-            "vmware": "Гипервизор", "hyperv": "Гипервизор",
-            "mouse": "Мышь", "keyboard": "Клавиатура",
-            "printer": "Принтер", "monitor": "Монитор"
-        }
+        # Сначала проверяем prefix из конфига
+        prefix = tab_config.get("prefix", "")
+        if not prefix:
+            # Fallback на старый маппинг
+            component_mapping = {
+                "processor": "Процессор", "gpu": "Видеоконтроллер",
+                "motherboard": "Материнская плата", "hdd": "HDD/SSD",
+                "server_ram": "Оперативная память", "os": "ОС", "server_os": "ОС",
+                "vmware": "Гипервизор", "hyperv": "Гипервизор",
+                "mouse": "Мышь", "keyboard": "Клавиатура",
+                "printer": "Принтер", "monitor": "Монитор"
+            }
+            prefix = component_mapping.get(var_name, "")
 
-        prefix = component_mapping.get(var_name, "")
         if not prefix:
             return ""
 
@@ -361,6 +364,17 @@ class PropertiesDialog:
         ctk.CTkButton(button_frame, text="Отмена", command=self.dialog.destroy, fg_color="#CD3333", width=100,
                       height=35).pack(side=tk.RIGHT, padx=5)
 
+    def _create_tab_widget(self, frame, config, is_hardware):
+        """Создаёт виджет выбора: CPE-браузер если есть cpe_filter, иначе старый список."""
+        if "cpe_filter" in config:
+            current_value = self.get_current_selection(config)
+            self.create_cpe_browser(frame, config, current_value, is_hardware=is_hardware)
+        else:
+            items = self.cached_data.get(config["var_name"], [])
+            current_value = self.get_current_selection(config)
+            self.create_combo_selector(frame, config["title"], items, config["var_name"],
+                                       current_value, is_hardware=is_hardware)
+
     def create_hardware_editor(self, parent, hardware_configs: List[Dict]):
         """Создаёт редактор аппаратной части."""
         if len(hardware_configs) > 1:
@@ -369,16 +383,9 @@ class PropertiesDialog:
             for config in hardware_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
-                items = self.cached_data.get(config["var_name"], [])
-                current_value = self.get_current_selection(config)
-                self.create_combo_selector(frame, config["title"], items, config["var_name"], current_value,
-                                           is_hardware=True)
+                self._create_tab_widget(frame, config, is_hardware=True)
         else:
-            config = hardware_configs[0]
-            items = self.cached_data.get(config["var_name"], [])
-            current_value = self.get_current_selection(config)
-            self.create_combo_selector(parent, config["title"], items, config["var_name"], current_value,
-                                       is_hardware=True)
+            self._create_tab_widget(parent, hardware_configs[0], is_hardware=True)
 
     def create_software_editor(self, parent, software_configs: List[Dict]):
         """Создаёт редактор программного обеспечения."""
@@ -388,20 +395,172 @@ class PropertiesDialog:
             for config in software_configs:
                 tabview.add(config["title"])
                 frame = tabview.tab(config["title"])
-                items = self.cached_data.get(config["var_name"], [])
-                current_value = self.get_current_selection(config)
-                self.create_combo_selector(frame, config["title"], items, config["var_name"], current_value,
-                                           is_hardware=False)
+                self._create_tab_widget(frame, config, is_hardware=False)
         else:
-            config = software_configs[0]
-            items = self.cached_data.get(config["var_name"], [])
-            current_value = self.get_current_selection(config)
-            self.create_combo_selector(parent, config["title"], items, config["var_name"], current_value,
-                                       is_hardware=False)
+            self._create_tab_widget(parent, software_configs[0], is_hardware=False)
+
+    def create_cpe_browser(self, parent, config: Dict, current_value: str = "",
+                           is_hardware: bool = True):
+        """Создаёт иерархический CPE-браузер (аналог node_dialog версии)."""
+        from utils.styled_dropdown import StyledDropdown
+
+        var_name = config["var_name"]
+        title = config["title"]
+        cpe_filter = config["cpe_filter"]
+        part = cpe_filter.get("part")
+        vendors_filter = cpe_filter.get("vendors")
+        families_map = cpe_filter.get("families")
+        p_like = cpe_filter.get("product_like")
+        p_not_like = cpe_filter.get("product_not_like")
+        has_families = bool(families_map)
+
+        frame = ctk.CTkFrame(parent)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, pady=(0, 10))
+
+        var = tk.StringVar(value=current_value)
+        if is_hardware:
+            self.hardware_combos[var_name] = var
+        else:
+            self.software_combos[var_name] = var
+
+        cpe_state = {"vendor": "", "family_prefix": "", "product": "", "version": ""}
+
+        def _make_step(lbl):
+            sf = ctk.CTkFrame(frame, fg_color="transparent")
+            ctk.CTkLabel(sf, text=lbl, font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, pady=(0, 4))
+            v = tk.StringVar()
+            cb = StyledDropdown(sf, variable=v)
+            cb.pack(fill=tk.X)
+            cl = ctk.CTkLabel(sf, text="", font=("Segoe UI", 10), text_color="gray")
+            cl.pack(anchor=tk.W, pady=(2, 0))
+            return sf, v, cb, cl
+
+        # Контейнер для шагов — порядок фиксирован
+        steps_container = ctk.CTkFrame(frame, fg_color="transparent")
+        steps_container.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        vendor_f, vendor_var, vendor_cb, _ = _make_step("1. Производитель")
+        vendor_f.pack(in_=steps_container, fill=tk.X, pady=(0, 6))
+
+        if has_families:
+            family_f, family_var, family_cb, family_cnt = _make_step("2. Семейство")
+            product_f, product_var, product_cb, product_cnt = _make_step("3. Модель")
+            version_f, version_var, version_cb, version_cnt = _make_step("4. Версия")
+        else:
+            family_f = family_var = family_cb = family_cnt = None
+            product_f, product_var, product_cb, product_cnt = _make_step("2. Продукт")
+            version_f, version_var, version_cb, version_cnt = _make_step("3. Версия")
+
+        # Выбранное (внизу фрейма)
+        sel_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        sel_frame.pack(fill=tk.X, pady=(8, 0))
+        ctk.CTkLabel(sel_frame, text="Выбрано:", font=("Segoe UI", 11, "bold")).pack(side=tk.LEFT, padx=(0, 5))
+        selected_label = ctk.CTkLabel(sel_frame, text=current_value if current_value else "не выбрано",
+                                       text_color="green" if current_value else "gray")
+        selected_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ctk.CTkButton(sel_frame, text="✕ Сбросить", width=80, height=25,
+                       command=lambda: _clear()).pack(side=tk.RIGHT)
+
+        def _show_step(step_frame):
+            if not step_frame.winfo_manager():
+                step_frame.pack(in_=steps_container, fill=tk.X, pady=(0, 6))
+
+        def _hide_from(level):
+            if level <= 2 and family_f:
+                family_f.pack_forget()
+            if level <= 3:
+                product_f.pack_forget()
+            if level <= 4:
+                version_f.pack_forget()
+
+        def _clear():
+            var.set("")
+            vendor_var.set("")
+            if family_var: family_var.set("")
+            product_var.set("")
+            version_var.set("")
+            cpe_state.update({"vendor": "", "family_prefix": "", "product": "", "version": ""})
+            _hide_from(2)
+            selected_label.configure(text="не выбрано", text_color="gray")
+
+        def _update_display():
+            v, p, ver = cpe_state["vendor"], cpe_state["product"], cpe_state["version"]
+            if v and p:
+                display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
+                if ver: display += f" {ver}"
+                var.set(display)
+                selected_label.configure(text=display, text_color="green")
+
+        vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
+        vendor_cb.configure(values=vendors)
+
+        def _on_vendor(*_):
+            vendor = vendor_var.get().strip()
+            if not vendor: return
+            cpe_state.update({"vendor": vendor, "family_prefix": "", "product": "", "version": ""})
+            if family_var: family_var.set("")
+            product_var.set("")
+            version_var.set("")
+            _hide_from(2)
+            if has_families and vendor in families_map:
+                fam_data = self.db.get_product_families(vendor, part=part, family_prefixes=families_map[vendor])
+                disp = [f"{n} ({c})" for n, pf, c in fam_data]
+                self._family_map = {f"{n} ({c})": pf for n, pf, c in fam_data}
+                family_cb.configure(values=disp)
+                family_cnt.configure(text=f"{len(fam_data)} семейств")
+                _show_step(family_f)
+            else:
+                products = self.db.get_products(vendor, part=part,
+                                                 product_like=p_like, product_not_like=p_not_like)
+                product_cb.configure(values=products)
+                product_cnt.configure(text=f"{len(products)} продуктов")
+                _show_step(product_f)
+
+        def _on_family(*_):
+            if not family_var: return
+            sel = family_var.get().strip()
+            prefix = getattr(self, '_family_map', {}).get(sel, "")
+            if not prefix: return
+            cpe_state.update({"family_prefix": prefix, "product": "", "version": ""})
+            product_var.set("")
+            version_var.set("")
+            version_f.pack_forget()
+            products = self.db.get_products_by_prefix(cpe_state["vendor"], prefix, part=part,
+                                                       product_like=p_like, product_not_like=p_not_like)
+            product_cb.configure(values=products)
+            product_cnt.configure(text=f"{len(products)} моделей")
+            _show_step(product_f)
+
+        def _on_product(*_):
+            product = product_var.get().strip()
+            vendor = cpe_state["vendor"]
+            if not product or not vendor: return
+            cpe_state.update({"product": product, "version": ""})
+            version_var.set("")
+            versions = self.db.get_versions(vendor, product)
+            version_cb.configure(values=versions)
+            version_cnt.configure(text=f"{len(versions)} версий")
+            if versions:
+                _show_step(version_f)
+            else:
+                version_f.pack_forget()
+            _update_display()
+
+        def _on_version(*_):
+            version = version_var.get().strip()
+            if version:
+                cpe_state["version"] = version
+                _update_display()
+
+        vendor_var.trace("w", _on_vendor)
+        if family_var: family_var.trace("w", _on_family)
+        product_var.trace("w", _on_product)
+        version_var.trace("w", _on_version)
 
     def create_combo_selector(self, parent, title: str, items: List[str], var_name: str, current_value: str = "",
                               is_hardware: bool = True):
-        """Создаёт комбобокс с поиском."""
+        """Создаёт комбобокс с поиском (старый виджет для табов без cpe_filter)."""
         frame = ctk.CTkFrame(parent)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -919,7 +1078,10 @@ class PropertiesDialog:
             if var_name in self.hardware_combos:
                 value = self.hardware_combos[var_name].get().strip()
                 if value:
-                    if "Процессор" in tab_config["title"]:
+                    prefix = tab_config.get("prefix", "")
+                    if prefix:
+                        hardware_items.append(f"{prefix}: {value}")
+                    elif "Процессор" in tab_config["title"]:
                         hardware_items.append(f"Процессор: {value}")
                     elif "Видеоконтроллер" in tab_config["title"]:
                         hardware_items.append(f"Видеоконтроллер: {value}")
@@ -935,7 +1097,10 @@ class PropertiesDialog:
             if var_name in self.software_combos:
                 value = self.software_combos[var_name].get().strip()
                 if value:
-                    if "Операционн" in tab_config["title"] or "ОС" in tab_config["title"]:
+                    prefix = tab_config.get("prefix", "")
+                    if prefix:
+                        software_items.append(f"{prefix}: {value}")
+                    elif "Операционн" in tab_config["title"] or "ОС" in tab_config["title"]:
                         software_items.append(f"ОС: {value}")
                     elif "Прикладное ПО" in tab_config["title"]:
                         software_items.append(f"Приложение: {value}")
@@ -973,7 +1138,7 @@ class ViewOnlyPropertiesDialog:
         self.dialog.geometry("850x750")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран — можно открывать несколько окон
 
         self.create_widgets()
         self.center_window()
@@ -990,9 +1155,7 @@ class ViewOnlyPropertiesDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def get_node_type_russian(self, node_type_en: str) -> str:
         from config.node_config import NODE_TYPE_RUSSIAN

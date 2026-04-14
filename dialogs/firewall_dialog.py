@@ -13,6 +13,7 @@ from datetime import datetime
 import os
 import random
 from typing import Optional
+from utils.theme import center_window
 
 from models.node import Node
 from models.firewall import FirewallRule, FirewallManager
@@ -41,7 +42,7 @@ class FirewallDialog:
         self.dialog.geometry("1300x850")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
         # Закрытие через крестик = отмена изменений
         self.dialog.protocol("WM_DELETE_WINDOW", self._on_cancel)
 
@@ -66,9 +67,7 @@ class FirewallDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def add_demo_rules(self):
         """Добавляет демонстрационные правила."""
@@ -514,7 +513,7 @@ class FirewallRuleDialog:
         self.dialog.geometry("750x800")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         self.create_widgets()
         self.center_window()
@@ -531,9 +530,7 @@ class FirewallRuleDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def create_widgets(self):
         # Промт 9 №6: современный стиль — палитра из utils.theme,

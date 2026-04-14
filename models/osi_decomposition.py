@@ -794,6 +794,6 @@ class TopologyDecomposition:
             "Laptop": 6,
         }
 
-        nodes = list(self.board.nodes)
+        nodes = [n for n in self.board.nodes if n.type != "Internet"]
         nodes.sort(key=lambda n: type_priority.get(n.type, 99))
         return nodes

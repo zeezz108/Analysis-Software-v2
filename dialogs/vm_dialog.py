@@ -13,6 +13,7 @@ import threading
 from typing import Optional, List, Dict, Any
 
 from models.node import Node, VirtualMachine
+from utils.theme import center_window
 from database.cve_db import CVEDatabase
 from utils.cache import DataCache
 from utils.validators import validate_ip, validate_mac, validate_mask
@@ -29,7 +30,7 @@ class VMManagementDialog:
         self.dialog.title(f"Управление ВМ на сервере: {server_node.name}")
         self.dialog.geometry("950x650")
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         self.create_widgets()
         self.center_window()
@@ -47,9 +48,7 @@ class VMManagementDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def create_widgets(self):
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
@@ -194,7 +193,7 @@ class VMCreationDialog:
         self.dialog.title("Редактирование ВМ" if vm_to_edit else "Создание новой ВМ")
         self.dialog.geometry("850x750")
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         self.show_loading_screen()
         self.dialog.after(100, self.load_data_async)
@@ -211,9 +210,7 @@ class VMCreationDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def show_loading_screen(self):
         temp_frame = ctk.CTkFrame(self.dialog)

@@ -12,6 +12,7 @@ import customtkinter as ctk
 from typing import Dict, Optional, List
 
 from models.node import Node
+from utils.theme import center_window
 
 
 class LinkPortSelectionDialog:
@@ -45,9 +46,7 @@ class LinkPortSelectionDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def get_node_type_russian(self, node_type_en: str) -> str:
         mapping = {

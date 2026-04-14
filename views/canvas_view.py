@@ -26,6 +26,7 @@ from dialogs.routing_dialog import RoutingTableDialog
 from dialogs.vm_dialog import VMManagementDialog
 from views.context_menus import ZoneContextMenuHandler, NodeContextMenuHandler
 from config.node_config import NODE_COLORS, NODE_TYPE_RUSSIAN, ICON_FILES, RESOURCES_DIR
+from utils.theme import center_window
 
 
 class CanvasView:
@@ -36,12 +37,12 @@ class CanvasView:
     ICON_BOUNDS_CACHE = {}
 
     # Размеры «мирового» холста (в логических координатах, без учёта зума)
-    WORLD_WIDTH = 4000
-    WORLD_HEIGHT = 3000
+    WORLD_WIDTH = 8000
+    WORLD_HEIGHT = 6000
 
     # Дискретные уровни зума — шаг как у размерной сетки
     ZOOM_LEVELS = [0.25, 0.33, 0.5, 0.67, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0]
-    ZOOM_DEFAULT = 0.75  # Стартовый зум: иконки оптимального размера, холст больше окна
+    ZOOM_DEFAULT = 1.0  # Стартовый зум 100%
 
     def __init__(self, root: tk.Tk, board: Board):
         self.root = root
@@ -283,10 +284,7 @@ class CanvasView:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() - 300) // 2
-        y = (dialog.winfo_screenheight() - 200) // 2
-        dialog.geometry(f"300x200+{x}+{y}")
+        center_window(dialog, 300, 200)
 
         ctk.CTkLabel(dialog, text="Настройки сетки", font=("Segoe UI", 16, "bold")).pack(pady=(15, 10))
 
@@ -331,10 +329,7 @@ class CanvasView:
         dialog.transient(self.root)
         dialog.grab_set()
 
-        dialog.update_idletasks()
-        x = (dialog.winfo_screenwidth() - 350) // 2
-        y = (dialog.winfo_screenheight() - 250) // 2
-        dialog.geometry(f"350x250+{x}+{y}")
+        center_window(dialog, 350, 250)
 
         ctk.CTkLabel(dialog, text="Масштаб интерфейса", font=("Segoe UI", 16, "bold")).pack(pady=(15, 5))
         ctk.CTkLabel(dialog, text="Выберите масштаб отображения элементов",
@@ -1007,10 +1002,7 @@ class CanvasView:
                 subtype_dialog.transient(self.root)
                 subtype_dialog.grab_set()
 
-                subtype_dialog.update_idletasks()
-                x = (subtype_dialog.winfo_screenwidth() // 2) - 200
-                y = (subtype_dialog.winfo_screenheight() // 2) - 110
-                subtype_dialog.geometry(f'400x220+{x}+{y}')
+                center_window(subtype_dialog, 400, 220)
 
                 main_frame = ctk.CTkFrame(subtype_dialog)
                 main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
@@ -1491,6 +1483,14 @@ class CanvasView:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть паспорт: {str(e)}")
 
+    def show_node_capec(self, node: Node):
+        """Открывает окно паттернов атак CAPEC для узла."""
+        from dialogs.capec_dialog import CAPECDialog
+        try:
+            CAPECDialog(self.root, node)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть CAPEC: {str(e)}")
+
     def open_firewall(self, node: Node = None):
         import copy as _copy
         if node is None and self.selected_node_id:
@@ -1882,14 +1882,18 @@ class CanvasView:
     # ====================================================================
 
     _RECENT_FILE = os.path.join("config", "recent_topologies.json")
+    _SCHEMES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "schemes")
 
     def save_topology(self):
         """Сохраняет текущую топологию в JSON-файл."""
         from tkinter import filedialog
         import json
 
+        os.makedirs(self._SCHEMES_DIR, exist_ok=True)
+
         filepath = filedialog.asksaveasfilename(
             title="Сохранить схему",
+            initialdir=self._SCHEMES_DIR,
             defaultextension=".json",
             filetypes=[("Файлы топологии", "*.json"), ("Все файлы", "*.*")],
         )
@@ -1907,36 +1911,138 @@ class CanvasView:
 
     def load_topology(self):
         """Открывает топологию из JSON-файла или из списка недавних."""
-        from tkinter import filedialog
-        import json
+        from utils.theme import color, style_dialog
+        import glob as _glob
 
-        # Собираем недавние
         recent = self._get_recent()
 
-        if recent:
-            # Диалог с выбором: открыть файл или из недавних
-            menu = tk.Menu(self.root, tearoff=0)
-            menu.add_command(label="📂  Выбрать файл...",
-                             command=lambda: self._load_from_file())
-            menu.add_separator()
-            for path in recent:
-                short = os.path.basename(path)
-                menu.add_command(label=f"📄  {short}",
-                                 command=lambda p=path: self._load_from_path(p))
-            try:
-                menu.tk_popup(
-                    self.root.winfo_pointerx(),
-                    self.root.winfo_pointery()
-                )
-            except Exception:
-                self._load_from_file()
-        else:
-            self._load_from_file()
+        # Файлы из папки schemes/
+        os.makedirs(self._SCHEMES_DIR, exist_ok=True)
+        scheme_files = sorted(
+            _glob.glob(os.path.join(self._SCHEMES_DIR, "*.json")),
+            key=os.path.getmtime, reverse=True
+        )
+
+        dlg = ctk.CTkToplevel(self.root)
+        dlg.title("Открыть схему")
+        dlg.resizable(True, True)
+        dlg.minsize(600, 400)
+        dlg.transient(self.root)
+        dlg.grab_set()
+        dlg.configure(fg_color=color("dialog_bg"))
+
+        main = ctk.CTkFrame(dlg, fg_color="transparent")
+        main.pack(fill=tk.BOTH, expand=True, padx=24, pady=20)
+
+        # --- Кнопки внизу (пакуем ПЕРВЫМИ — они всегда видны) ---
+        bottom = ctk.CTkFrame(main, fg_color="transparent")
+        bottom.pack(side=tk.BOTTOM, fill=tk.X)
+
+        ctk.CTkFrame(bottom, fg_color=color("divider"), height=1).pack(
+            fill=tk.X, pady=(0, 12))
+
+        btn_row = ctk.CTkFrame(bottom, fg_color="transparent")
+        btn_row.pack(fill=tk.X)
+
+        ctk.CTkButton(
+            btn_row, text="📂  Выбрать файл...",
+            command=lambda: (dlg.destroy(), self._load_from_file()),
+            fg_color=color("primary"), hover_color=color("primary_hover"),
+            text_color="#FFFFFF", height=36, corner_radius=8,
+            font=("Segoe UI", 13)
+        ).pack(side=tk.LEFT)
+
+        ctk.CTkButton(
+            btn_row, text="Отмена",
+            command=dlg.destroy,
+            fg_color=color("ghost_bg"), hover_color=color("ghost_hover"),
+            text_color=color("text_primary"), height=36, corner_radius=8,
+            font=("Segoe UI", 13)
+        ).pack(side=tk.RIGHT)
+
+        # --- Заголовок ---
+        ctk.CTkLabel(main, text="Открыть схему",
+                      font=("Segoe UI", 16, "bold"),
+                      text_color=color("text_primary"),
+                      anchor="w").pack(fill=tk.X, pady=(0, 16))
+
+        # --- Скроллируемый контейнер (заполняет оставшееся пространство) ---
+        scroll = ctk.CTkScrollableFrame(main, fg_color="transparent")
+        scroll.pack(fill=tk.BOTH, expand=True, pady=(0, 4))
+
+        card_count = 0
+
+        def _make_file_card(parent, path):
+            """Создаёт карточку файла."""
+            short = os.path.basename(path)
+            folder = os.path.dirname(path)
+            btn_frame = ctk.CTkFrame(parent, fg_color=color("card_bg"),
+                                      corner_radius=8, border_width=1,
+                                      border_color=color("card_border"))
+            btn_frame.pack(fill=tk.X, pady=2)
+
+            inner = ctk.CTkFrame(btn_frame, fg_color="transparent")
+            inner.pack(fill=tk.X, padx=12, pady=8)
+
+            ctk.CTkLabel(inner, text=f"📄  {short}",
+                          font=("Segoe UI", 13),
+                          text_color=color("text_primary"),
+                          anchor="w").pack(fill=tk.X)
+            ctk.CTkLabel(inner, text=folder,
+                          font=("Segoe UI", 10),
+                          text_color=color("text_muted"),
+                          anchor="w").pack(fill=tk.X)
+
+            btn_frame.bind("<Enter>", lambda e, f=btn_frame: f.configure(
+                fg_color=color("card_selected"), border_color=color("card_sel_brd")))
+            btn_frame.bind("<Leave>", lambda e, f=btn_frame: f.configure(
+                fg_color=color("card_bg"), border_color=color("card_border")))
+
+            def _on_click(e, p=path, d=dlg):
+                d.destroy()
+                self._load_from_path(p)
+
+            for widget in (btn_frame, inner, *inner.winfo_children()):
+                widget.bind("<Button-1>", _on_click)
+                widget.configure(cursor="hand2")
+
+        # Сохранённые схемы из папки schemes/
+        if not scheme_files:
+            ctk.CTkLabel(scroll, text="Папка schemes/ пуста",
+                          font=("Segoe UI", 12),
+                          text_color=color("text_muted"),
+                          anchor="w").pack(fill=tk.X, pady=(8, 8))
+        if scheme_files:
+            ctk.CTkLabel(scroll, text="📁  Сохранённые схемы",
+                          font=("Segoe UI", 12),
+                          text_color=color("text_secondary"),
+                          anchor="w").pack(fill=tk.X, pady=(0, 8))
+            for path in scheme_files:
+                _make_file_card(scroll, path)
+                card_count += 1
+
+        # Недавние (только существующие и не из schemes/)
+        scheme_abs = {os.path.abspath(p) for p in scheme_files}
+        recent_extra = [p for p in recent
+                        if os.path.exists(p) and os.path.abspath(p) not in scheme_abs]
+        if recent_extra:
+            ctk.CTkLabel(scroll, text="🕐  Недавние",
+                          font=("Segoe UI", 12),
+                          text_color=color("text_secondary"),
+                          anchor="w").pack(fill=tk.X, pady=(12, 8))
+            for path in recent_extra:
+                _make_file_card(scroll, path)
+                card_count += 1
+
+        dlg_height = min(550, max(280, 220 + card_count * 58))
+        style_dialog(dlg, width=460, height=dlg_height)
 
     def _load_from_file(self):
         from tkinter import filedialog
+        os.makedirs(self._SCHEMES_DIR, exist_ok=True)
         filepath = filedialog.askopenfilename(
             title="Открыть схему",
+            initialdir=self._SCHEMES_DIR,
             filetypes=[("Файлы топологии", "*.json"), ("Все файлы", "*.*")],
         )
         if filepath:
@@ -1962,24 +2068,32 @@ class CanvasView:
         import json
         try:
             with open(self._RECENT_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                paths = json.load(f)
+            # Убираем несуществующие файлы
+            existing = [p for p in paths if os.path.exists(p)]
+            if len(existing) != len(paths):
+                self._save_recent(existing)
+            return existing
         except Exception:
             return []
 
-    def _add_recent(self, filepath):
+    def _save_recent(self, recent):
         import json
-        recent = self._get_recent()
-        filepath = os.path.abspath(filepath)
-        if filepath in recent:
-            recent.remove(filepath)
-        recent.insert(0, filepath)
-        recent = recent[:5]
         os.makedirs(os.path.dirname(self._RECENT_FILE), exist_ok=True)
         try:
             with open(self._RECENT_FILE, "w", encoding="utf-8") as f:
                 json.dump(recent, f, ensure_ascii=False, indent=2)
         except Exception:
             pass
+
+    def _add_recent(self, filepath):
+        recent = self._get_recent()
+        filepath = os.path.abspath(filepath)
+        if filepath in recent:
+            recent.remove(filepath)
+        recent.insert(0, filepath)
+        recent = recent[:10]
+        self._save_recent(recent)
 
     def build_test_topology(self):
         """Создаёт тестовую топологию: Интернет → Маршрутизатор → [АРМ1, АРМ2, Сервер]."""
@@ -2083,8 +2197,8 @@ class CanvasView:
         # --- Фоновая сетка (клеточки на всё полотно) ---
         grid_step = 30
         grid_color = theme.c("divider")
-        total_w = 4000
-        total_h = 3000
+        total_w = self.WORLD_WIDTH
+        total_h = self.WORLD_HEIGHT
         step_px = max(4, grid_step * z_scale)
         if step_px >= 6:
             pw = int(total_w * z_scale)
@@ -2125,9 +2239,9 @@ class CanvasView:
 
             # Названия зон в мировых размерах (пропорционально самой зоне)
             main_text = z.get_display_text()
-            base_title = max(10, min(28, int(round(z.height * 0.05))))
-            base_sub = max(8, min(20, int(round(z.height * 0.035))))
-            base_desc = max(7, min(16, int(round(z.height * 0.028))))
+            base_title = max(10, min(14, int(round(z.height * 0.05))))
+            base_sub = max(8, min(12, int(round(z.height * 0.035))))
+            base_desc = max(7, min(10, int(round(z.height * 0.028))))
 
             title_y_world = 15 + base_title / 2
             self.canvas.create_text(

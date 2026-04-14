@@ -13,9 +13,11 @@ import threading
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from utils.theme import center_window
 
 from models.node import Node
 from database.cve_db import CVEDatabase
+from database.capec_db import CAPECDatabase
 from utils.cache import DataCache
 from utils.cpe_utils import extract_cpe_components
 
@@ -35,12 +37,17 @@ class SecurityPassportDialog:
             messagebox.showerror("Ошибка", str(e))
             raise
 
+        try:
+            self.capec_db = CAPECDatabase()
+        except Exception:
+            self.capec_db = None
+
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"Паспорт безопасности: {node.name}")
         self.dialog.geometry("1600x1020")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран — можно открывать несколько окон одновременно
 
         self.show_loading_screen()
         self.dialog.after(100, self.load_security_data_async)
@@ -57,9 +64,7 @@ class SecurityPassportDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def show_loading_screen(self):
         """Показывает экран загрузки."""
@@ -463,44 +468,9 @@ class SecurityPassportDialog:
         main_frame = ctk.CTkFrame(self.dialog)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Заголовок
-        title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        title_frame.pack(fill=tk.X, pady=(0, 20))
-
-        ctk.CTkLabel(title_frame, text="📋", font=("Segoe UI", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
-
-        header_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
-        header_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        ctk.CTkLabel(header_frame, text="Паспорт безопасности", font=("Segoe UI", 22, "bold")).pack(anchor=tk.W)
-        ctk.CTkLabel(
-            header_frame, text=f"{self.node.name} • {self.get_node_type_russian(self.node.type)}",
-            font=("Segoe UI", 13), text_color="gray"
-        ).pack(anchor=tk.W)
-
-        # Таблица
-        table_card = ctk.CTkFrame(main_frame)
-        table_card.pack(fill=tk.BOTH, expand=True)
-
-        table_header = ctk.CTkFrame(table_card, fg_color="transparent")
-        table_header.pack(fill=tk.X, padx=15, pady=(10, 5))
-
-        ctk.CTkLabel(table_header, text="🔍 Найденные уязвимости", font=("Segoe UI", 15, "bold")).pack(side=tk.LEFT)
-
-        self.count_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 13), text_color="gray")
-        self.count_label.pack(side=tk.LEFT, padx=(10, 0))
-
-        self.status_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 12), text_color="gray")
-        self.status_label.pack(side=tk.RIGHT)
-
-        table_container = ctk.CTkFrame(table_card)
-        table_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
-
-        self.create_vulnerabilities_table(table_container)
-
-        # Кнопки
+        # --- Кнопки внизу (пакуем первыми — всегда видны) ---
         button_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        button_frame.pack(fill=tk.X, pady=(20, 0))
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 0))
 
         left_buttons = ctk.CTkFrame(button_frame, fg_color="transparent")
         left_buttons.pack(side=tk.LEFT)
@@ -515,6 +485,41 @@ class SecurityPassportDialog:
 
         ctk.CTkButton(right_buttons, text="✕ Закрыть", command=self.dialog.destroy, width=110, height=38,
                       fg_color="#F44336").pack(side=tk.RIGHT, padx=5)
+
+        # --- Заголовок ---
+        title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        title_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ctk.CTkLabel(title_frame, text="📋", font=("Segoe UI", 36), text_color="#1E88E5").pack(side=tk.LEFT, padx=(0, 10))
+
+        header_frame = ctk.CTkFrame(title_frame, fg_color="transparent")
+        header_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        ctk.CTkLabel(header_frame, text="Паспорт безопасности", font=("Segoe UI", 22, "bold")).pack(anchor=tk.W)
+        ctk.CTkLabel(
+            header_frame, text=f"{self.node.name} • {self.get_node_type_russian(self.node.type)}",
+            font=("Segoe UI", 13), text_color="gray"
+        ).pack(anchor=tk.W)
+
+        # --- Таблица CVE (верхняя, занимает ~60% высоты) ---
+        table_card = ctk.CTkFrame(main_frame)
+        table_card.pack(fill=tk.BOTH, expand=True, pady=(0, 8))
+
+        table_header = ctk.CTkFrame(table_card, fg_color="transparent")
+        table_header.pack(fill=tk.X, padx=15, pady=(10, 5))
+
+        ctk.CTkLabel(table_header, text="🔍 Найденные уязвимости (CVE)", font=("Segoe UI", 15, "bold")).pack(side=tk.LEFT)
+
+        self.count_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 13), text_color="gray")
+        self.count_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        self.status_label = ctk.CTkLabel(table_header, text="", font=("Segoe UI", 12), text_color="gray")
+        self.status_label.pack(side=tk.RIGHT)
+
+        table_container = ctk.CTkFrame(table_card)
+        table_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+
+        self.create_vulnerabilities_table(table_container)
 
         self.center_window()
 
@@ -599,6 +604,90 @@ class SecurityPassportDialog:
             self.status_label.configure(text="✅ Уязвимостей не найдено", text_color="green")
 
         self.count_label.configure(text=f"({total_vulnerabilities})")
+
+    def create_capec_table(self, parent):
+        """Создаёт таблицу паттернов атак CAPEC."""
+        style = ttk.Style()
+
+        style.configure("Capec.Treeview", background="white", foreground="black",
+                        fieldbackground="white", font=('Segoe UI', 10), rowheight=28)
+        style.configure("Capec.Treeview.Heading", background="#d9d9d9", foreground="black",
+                        font=('Segoe UI', 10, 'bold'), height=30)
+
+        columns = ("CAPEC ID", "Название атаки", "Уровень", "Серьёзность",
+                   "Вероятность", "Связанные CWE", "Описание")
+
+        self.capec_tree = ttk.Treeview(parent, columns=columns, show="headings",
+                                        height=10, selectmode="browse", style="Capec.Treeview")
+
+        for col in columns:
+            self.capec_tree.heading(col, text=col)
+
+        self.capec_tree.column("CAPEC ID", width=90, anchor='center')
+        self.capec_tree.column("Название атаки", width=280, anchor='w')
+        self.capec_tree.column("Уровень", width=90, anchor='center')
+        self.capec_tree.column("Серьёзность", width=100, anchor='center')
+        self.capec_tree.column("Вероятность", width=100, anchor='center')
+        self.capec_tree.column("Связанные CWE", width=130, anchor='center')
+        self.capec_tree.column("Описание", width=400, anchor='w')
+
+        vsb = ttk.Scrollbar(parent, orient="vertical", command=self.capec_tree.yview)
+        hsb = ttk.Scrollbar(parent, orient="horizontal", command=self.capec_tree.xview)
+        self.capec_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        self.capec_tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        parent.grid_rowconfigure(0, weight=1)
+        parent.grid_columnconfigure(0, weight=1)
+
+        # Цвета по severity
+        self.capec_tree.tag_configure('severity_vh', background='#FFCDD2')  # Very High — красный
+        self.capec_tree.tag_configure('severity_h', background='#FFE0B2')   # High — оранжевый
+        self.capec_tree.tag_configure('severity_m', background='#FFF9C4')   # Medium — жёлтый
+        self.capec_tree.tag_configure('severity_l', background='#C8E6C9')   # Low — зелёный
+        self.capec_tree.tag_configure('severity_vl', background='#E0E0E0')  # Very Low — серый
+
+    def populate_capec_table(self, capec_data: List[Dict]):
+        """Заполняет таблицу CAPEC."""
+        for item in self.capec_tree.get_children():
+            self.capec_tree.delete(item)
+
+        if not capec_data:
+            self.capec_tree.insert("", tk.END, values=(
+                "—", "Паттерны атак не найдены", "—", "—", "—", "—", "—"))
+            self.capec_status_label.configure(text="ℹ️ CAPEC не найдены", text_color="gray")
+            self.capec_count_label.configure(text="(0)")
+            return
+
+        severity_tags = {
+            "Very High": "severity_vh", "High": "severity_h",
+            "Medium": "severity_m", "Low": "severity_l", "Very Low": "severity_vl"
+        }
+
+        for entry in capec_data:
+            cwe_str = ", ".join(f"CWE-{c}" for c in entry["cwe_ids"])
+            tag = severity_tags.get(entry["severity"], "")
+            # Обрезаем описание для таблицы
+            desc = entry["description"]
+            if len(desc) > 150:
+                desc = desc[:147] + "..."
+
+            self.capec_tree.insert("", tk.END, values=(
+                f"CAPEC-{entry['capec_id']}",
+                entry["name"],
+                entry["abstraction"],
+                entry["severity"] or "—",
+                entry["likelihood"] or "—",
+                cwe_str,
+                desc
+            ), tags=(tag,) if tag else ())
+
+        total = len(capec_data)
+        self.capec_count_label.configure(text=f"({total})")
+        self.capec_status_label.configure(
+            text=f"⚠️ Найдено паттернов атак: {total}", text_color="#E65100")
 
     def export_to_pdf(self):
         """Экспортирует паспорт безопасности в PDF (через reportlab).

@@ -27,6 +27,7 @@ from models.node import Node
 from models.route import Route
 from utils.generators import uid
 from utils.network_utils import calculate_network, decimal_mask_to_cidr
+from utils.theme import center_window
 from utils.validators import validate_ip
 
 
@@ -58,7 +59,7 @@ class RouteEditDialog:
         self.dialog.geometry("620x620")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         # Для существующего маршрута определяем его текущий тип
         if route and route.is_default_route():
@@ -80,9 +81,7 @@ class RouteEditDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def get_available_interfaces(self) -> List[str]:
         """Список доступных сетевых интерфейсов узла."""
@@ -381,7 +380,7 @@ class RoutingTableDialog:
         self.dialog.title(f"Таблица маршрутизации: {node.name}")
         self.dialog.geometry("1050x640")
         self.dialog.transient(parent)
-        self.dialog.grab_set()
+        # grab_set убран
 
         self.create_widgets()
         self.center_window()
@@ -397,9 +396,7 @@ class RoutingTableDialog:
         else:
             width = self.dialog.winfo_reqwidth()
             height = self.dialog.winfo_reqheight()
-        x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
-        y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
-        self.dialog.geometry(f'{width}x{height}+{x}+{y}')
+        center_window(self.dialog, width, height)
 
     def create_widgets(self):
         from utils.theme import color as _tc
