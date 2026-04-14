@@ -8,8 +8,6 @@ dist/
 build/
 .DS_Store
 Thumbs.db
-database/cve_database.db
-database/cve_database_v2.db
 database/cve_database_v2.db-shm
 database/cve_database_v2.db-wal
 database/cve_db_v1_backup.py
