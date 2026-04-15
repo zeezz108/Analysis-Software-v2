@@ -862,26 +862,71 @@ class CVEDatabase:
 
     def get_cves_exact(self, vendor: str, product: str,
                        version: str = None) -> List[Dict]:
-        """Ищет CVE по точному совпадению CPE (vendor + product + version).
+        """Ищет CVE по точному совпадению CPE — универсальный поиск.
 
-        В отличие от get_cves_for_component, использует = вместо LIKE.
+        Покрывает все форматы хранения в NVD:
+        - product=core_i7, version=8700k (стандартная схема)
+        - product=core_i7-12700k, version=- (модель целиком в product)
+        - product=b150-a, version=- (материнки, накопители)
+        - product=b150-a_firmware, version=- (прошивки → тоже уязвимости железа)
+        - product=chrome, version=0.2.149.29 (ПО с конкретной версией)
+        - product=chrome, version=* (ПО wildcard)
         """
         cursor = self._connection.cursor()
+        v = vendor.lower()
+        p = product.lower()
+        ver = version.lower() if version else ""
 
-        query = """
+        base = """
             SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
             FROM cve_entries c
             JOIN cve_cpe_map m ON c.cve_id = m.cve_id
             JOIN cpe_entries p ON m.cpe_id = p.id
-            WHERE p.vendor = ? AND p.product = ?
         """
-        params = [vendor.lower(), product.lower()]
 
-        if version:
-            query += " AND (p.version = ? OR p.version = '*' OR p.version = '-')"
-            params.append(version.lower())
+        def _fetch(where, params):
+            cursor.execute(base + where + " LIMIT 500", params)
+            return [{"cve_id": r["cve_id"], "cvss_v2": r["cvss_v2"],
+                     "cvss_v3": r["cvss_v3"], "cvss_v4": r["cvss_v4"],
+                     "cwe_id": r["cwe_id"] or ""} for r in cursor.fetchall()]
 
-        query += " LIMIT 500"
+        all_results = []
+        seen = set()
+
+        def _add(results):
+            for r in results:
+                if r["cve_id"] not in seen:
+                    seen.add(r["cve_id"])
+                    all_results.append(r)
+
+        # Собираем все варианты product-names для поиска
+        product_variants = [p]
+
+        if ver:
+            # Варианты с версией в product name
+            product_variants.append(f"{p}-{ver}")     # core_i7-12700k
+            product_variants.append(f"{p}_{ver}")     # core_i7_12700k
+
+        # Для каждого варианта ищем hardware + firmware
+        for prod in product_variants:
+            if ver:
+                # С версией: точная версия + wildcard
+                _add(_fetch(
+                    "WHERE p.vendor = ? AND p.product = ? AND (p.version = ? OR p.version = '*' OR p.version = '-')",
+                    [v, prod, ver]))
+            else:
+                # Без версии: только wildcard
+                _add(_fetch(
+                    "WHERE p.vendor = ? AND p.product = ? AND (p.version = '*' OR p.version = '-')",
+                    [v, prod]))
+
+            # Firmware: product_firmware (ASUS b150-a → b150-a_firmware)
+            fw_prod = f"{prod}_firmware"
+            _add(_fetch(
+                "WHERE p.vendor = ? AND p.product = ? AND (p.version = '*' OR p.version = '-')",
+                [v, fw_prod]))
+
+        return all_results
 
         cursor.execute(query, params)
         return [

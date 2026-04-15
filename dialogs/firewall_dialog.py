@@ -3,7 +3,7 @@
 
 Содержит классы:
 - FirewallDialog: Главный диалог настройки файервола
-- FirewallRuleDialog: Диалог создания/редактирования правила
+- FirewallRuleDialog: Диалог создания/редактирования правила (Source -> Destination)
 """
 
 import tkinter as tk
@@ -71,28 +71,23 @@ class FirewallDialog:
 
     def add_demo_rules(self):
         """Добавляет демонстрационные правила."""
-        # Разрешить базовые входящие
+        # Разрешить весь трафик (базовое правило)
         rule1 = FirewallRule(
-            name="Базовая фильтрация (входящие)",
-            direction="in", action="allow", protocol="any",
-            description="Разрешить входящие подключения для базовой сетевой работы"
+            name="Базовая фильтрация (разрешить все)",
+            action="allow", protocol="any",
+            source_address="any", destination_address="any",
+            description="Разрешить весь трафик для базовой сетевой работы"
         )
         self.manager.add_rule(rule1)
-
-        # Разрешить базовые исходящие
-        rule2 = FirewallRule(
-            name="Базовая фильтрация (исходящие)",
-            direction="out", action="allow", protocol="any",
-            description="Разрешить исходящие подключения для базовой сетевой работы"
-        )
-        self.manager.add_rule(rule2)
 
         # Удаленный рабочий стол
         if self.node.type in ["ARM", "Laptop", "Server"]:
             rule3 = FirewallRule(
                 name="Удаленный рабочий стол (RDP)",
-                direction="in", action="allow", protocol="tcp",
-                local_ports="3389",
+                action="allow", protocol="tcp",
+                source_address="any",
+                destination_address="any",
+                destination_ports="3389",
                 description="Разрешить входящие подключения по RDP"
             )
             self.manager.add_rule(rule3)
@@ -101,8 +96,10 @@ class FirewallDialog:
         if self.node.type in ["Server", "ARM"]:
             rule4 = FirewallRule(
                 name="Общий доступ к файлам (SMB)",
-                direction="in", action="allow", protocol="tcp",
-                local_ports="445,139",
+                action="allow", protocol="tcp",
+                source_address="any",
+                destination_address="any",
+                destination_ports="445,139",
                 description="Разрешить входящие SMB-подключения"
             )
             self.manager.add_rule(rule4)
@@ -145,8 +142,7 @@ class FirewallDialog:
             font=("Segoe UI", 11), text_color="gray"
         ).pack(anchor=tk.W)
 
-        # Статус брандмауэра (промт 8 №12: обводка только вокруг «Включен/Отключен»,
-        # а не вокруг всей строки)
+        # Статус брандмауэра
         status_color = "#4CAF50" if self.manager.firewall_enabled else "#F44336"
         status_frame = ctk.CTkFrame(top_frame, fg_color="transparent")
         status_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
@@ -222,27 +218,12 @@ class FirewallDialog:
         # Заголовок
         ctk.CTkLabel(parent, text="🔍 Фильтры", font=("Segoe UI", 14, "bold")).pack(anchor=tk.W, padx=10, pady=(10, 10))
 
-        # Направление
-        ctk.CTkLabel(parent, text="Направление:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 5))
-
-        self.direction_var = tk.StringVar(value="all")
-
-        ctk.CTkRadioButton(parent, text="Все правила", variable=self.direction_var, value="all",
-                           command=self.refresh_rules_list).pack(anchor=tk.W, padx=20, pady=2)
-        ctk.CTkRadioButton(parent, text="Входящие", variable=self.direction_var, value="in",
-                           command=self.refresh_rules_list).pack(anchor=tk.W, padx=20, pady=2)
-        ctk.CTkRadioButton(parent, text="Исходящие", variable=self.direction_var, value="out",
-                           command=self.refresh_rules_list).pack(anchor=tk.W, padx=20, pady=2)
-
-        # Разделитель
-        ctk.CTkFrame(parent, height=2, fg_color="gray").pack(fill=tk.X, padx=10, pady=15)
-
         # Действие
-        ctk.CTkLabel(parent, text="Действие:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(0, 5))
+        ctk.CTkLabel(parent, text="Действие:", font=("Segoe UI", 12, "bold")).pack(anchor=tk.W, padx=10, pady=(5, 5))
 
         self.action_var = tk.StringVar(value="all")
 
-        ctk.CTkRadioButton(parent, text="Все", variable=self.action_var, value="all",
+        ctk.CTkRadioButton(parent, text="Все правила", variable=self.action_var, value="all",
                            command=self.refresh_rules_list).pack(anchor=tk.W, padx=20, pady=2)
         ctk.CTkRadioButton(parent, text="Разрешить", variable=self.action_var, value="allow",
                            command=self.refresh_rules_list).pack(anchor=tk.W, padx=20, pady=2)
@@ -293,7 +274,7 @@ class FirewallDialog:
         list_frame = ctk.CTkFrame(parent, fg_color="transparent")
         list_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
 
-        columns = ("Статус", "Действие", "Направление", "Протокол", "Локальный порт", "Удаленный порт")
+        columns = ("Статус", "Действие", "Источник", "Назначение", "Протокол", "Порты назн.")
 
         # Стиль таблицы
         style = ttk.Style()
@@ -322,7 +303,7 @@ class FirewallDialog:
         vsb.config(command=self.rules_tree.yview)
         hsb.config(command=self.rules_tree.xview)
 
-        col_widths = [70, 90, 100, 80, 100, 100]
+        col_widths = [70, 90, 150, 150, 80, 100]
         for col, width in zip(columns, col_widths):
             self.rules_tree.heading(col, text=col)
             self.rules_tree.column(col, width=width, anchor="w")
@@ -362,15 +343,12 @@ class FirewallDialog:
         for item in self.rules_tree.get_children():
             self.rules_tree.delete(item)
 
-        direction_filter = self.direction_var.get()
         action_filter = self.action_var.get()
         protocol_filter = self.protocol_var.get()
         search_text = self.search_var.get().lower()
 
         filtered_rules = []
         for rule in self.manager.rules:
-            if direction_filter != "all" and rule.direction != direction_filter:
-                continue
             if action_filter != "all" and rule.action != action_filter:
                 continue
             if protocol_filter != "all" and rule.protocol != protocol_filter:
@@ -382,14 +360,15 @@ class FirewallDialog:
         for rule in filtered_rules:
             status_icon = "✅" if rule.enabled else "⬜"
             action_display = "Разрешить" if rule.action == "allow" else "Блокировать"
-            direction_display = "Входящее" if rule.direction == "in" else "Исходящее"
             protocol_display = {"any": "Любой", "tcp": "TCP", "udp": "UDP", "icmp": "ICMP"}.get(rule.protocol,
                                                                                                 rule.protocol)
+            src_display = rule.source_address if rule.source_address else "any"
+            dst_display = rule.destination_address if rule.destination_address else "any"
 
             self.rules_tree.insert("", tk.END, values=(
-                status_icon, action_display, direction_display, protocol_display,
-                rule.local_ports if rule.local_ports else "Любой",
-                rule.remote_ports if rule.remote_ports else "Любой"
+                status_icon, action_display, src_display, dst_display,
+                protocol_display,
+                rule.destination_ports if rule.destination_ports else "Любой"
             ), tags=('block' if rule.action == "block" else 'allow',), iid=rule.id)
 
         # Цвета строк
@@ -498,7 +477,7 @@ class FirewallDialog:
 
 
 class FirewallRuleDialog:
-    """Диалог создания/редактирования правила файервола."""
+    """Диалог создания/редактирования правила файервола (Source -> Destination)."""
 
     def __init__(self, parent, node: Node, rule: Optional[FirewallRule] = None):
         self.parent = parent
@@ -533,8 +512,6 @@ class FirewallRuleDialog:
         center_window(self.dialog, width, height)
 
     def create_widgets(self):
-        # Промт 9 №6: современный стиль — палитра из utils.theme,
-        # акцентные полоски, акцентные заголовки секций.
         from utils import theme
 
         surface_bg = theme.color("surface")
@@ -552,137 +529,9 @@ class FirewallRuleDialog:
         main_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
 
-        # Заголовок
-        title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        title_frame.pack(fill=tk.X, pady=(0, 15))
-
-        ctk.CTkLabel(title_frame, text="📋" if not self.rule else "✏",
-                      font=("Segoe UI", 28), text_color=primary).pack(side=tk.LEFT, padx=(0, 10))
-        ctk.CTkLabel(title_frame,
-                      text="Создание правила" if not self.rule else f"Редактирование: {self.rule.name}",
-                      font=("Segoe UI", 18, "bold"), text_color=text_primary).pack(side=tk.LEFT)
-
-        def section(header_text: str, subtitle: str = "") -> ctk.CTkFrame:
-            """Создаёт секцию-card с акцентной полоской и заголовком."""
-            frame = ctk.CTkFrame(main_frame, fg_color=card_bg,
-                                  border_width=1, border_color=border_clr, corner_radius=10)
-            frame.pack(fill=tk.X, pady=(0, 10))
-            # Синяя полоска убрана по запросу пользователя
-            header = ctk.CTkFrame(frame, fg_color="transparent")
-            header.pack(fill=tk.X, padx=16, pady=(10, 4))
-            ctk.CTkLabel(header, text=header_text, font=("Segoe UI", 14, "bold"),
-                          text_color=text_primary, anchor="w").pack(side=tk.LEFT)
-            if subtitle:
-                ctk.CTkLabel(header, text=subtitle, font=("Segoe UI", 10),
-                              text_color=text_muted, anchor="w").pack(side=tk.LEFT, padx=(12, 0))
-            return frame
-
-        # Выбор интерфейса
-        interface_frame = section("🔌 Применить к интерфейсу",
-                                   "любой или конкретный порт узла")
-
-        network_ports = [p for p in self.node.ports if p["port_type"] in ["ethernet", "pon", "wifi"]]
-        self.interface_var = tk.StringVar(value="any")
-
-        ctk.CTkRadioButton(interface_frame, text="Любой интерфейс", variable=self.interface_var, value="any").pack(
-            anchor=tk.W, padx=20, pady=2)
-
-        for port in network_ports:
-            icon = "" if port["port_type"] == "ethernet" else ("" if port["port_type"] == "pon" else "")
-            ip_info = f" ({port['ip_address']})" if port.get("ip_address") else ""
-            ctk.CTkRadioButton(interface_frame, text=f"{icon} {port['name']}{ip_info}", variable=self.interface_var,
-                               value=port["port_id"]).pack(anchor=tk.W, padx=40, pady=2)
-
-        # Действие и направление
-        action_frame = section("⚡ Действие и направление",
-                                "что делаем с трафиком и в каком направлении")
-
-        action_row = ctk.CTkFrame(action_frame, fg_color="transparent")
-        action_row.pack(fill=tk.X, padx=16, pady=5)
-
-        ctk.CTkLabel(action_row, text="Действие:", width=100, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        self.action_var = tk.StringVar(value=self.rule.action if self.rule else "allow")
-        ctk.CTkRadioButton(action_row, text="Разрешить", variable=self.action_var, value="allow").pack(side=tk.LEFT,
-                                                                                                         padx=(10, 20))
-        ctk.CTkRadioButton(action_row, text="Блокировать", variable=self.action_var, value="block").pack(side=tk.LEFT)
-
-        dir_row = ctk.CTkFrame(action_frame, fg_color="transparent")
-        dir_row.pack(fill=tk.X, padx=16, pady=(5, 10))
-
-        ctk.CTkLabel(dir_row, text="Направление:", width=100, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        self.direction_var = tk.StringVar(value=self.rule.direction if self.rule else "in")
-        ctk.CTkRadioButton(dir_row, text="Входящее", variable=self.direction_var, value="in").pack(side=tk.LEFT,
-                                                                                                     padx=(10, 20))
-        ctk.CTkRadioButton(dir_row, text="Исходящее", variable=self.direction_var, value="out").pack(side=tk.LEFT)
-
-        # Протокол и порты
-        ports_frame = section("🔀 Протокол и порты",
-                               "фильтр по L4-протоколу и портам")
-
-        proto_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        proto_row.pack(fill=tk.X, padx=16, pady=5)
-
-        ctk.CTkLabel(proto_row, text="Протокол:", width=100, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        self.protocol_var = tk.StringVar(value=self.rule.protocol if self.rule else "any")
-
-        protocols = [("Любой", "any"), ("TCP", "tcp"), ("UDP", "udp"), ("ICMP", "icmp")]
-        for text, value in protocols:
-            ctk.CTkRadioButton(proto_row, text=text, variable=self.protocol_var, value=value).pack(side=tk.LEFT, padx=5)
-
-        # Локальный порт
-        local_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        local_row.pack(fill=tk.X, padx=16, pady=5)
-
-        ctk.CTkLabel(local_row, text="Локальный порт:", width=110, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        self.local_port_var = tk.StringVar(value=self.rule.local_ports if self.rule else "")
-        ctk.CTkEntry(local_row, textvariable=self.local_port_var, width=150, placeholder_text="80,443").pack(
-            side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(local_row, text="(номер или список)", font=("Segoe UI", 10),
-                      text_color=text_muted).pack(side=tk.LEFT)
-
-        # Удаленный порт
-        remote_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        remote_row.pack(fill=tk.X, padx=16, pady=5)
-
-        ctk.CTkLabel(remote_row, text="Удаленный порт:", width=110, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        self.remote_port_var = tk.StringVar(value=self.rule.remote_ports if self.rule else "")
-        ctk.CTkEntry(remote_row, textvariable=self.remote_port_var, width=150, placeholder_text="80,443").pack(
-            side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_row, text="(оставьте пустым для любого)", font=("Segoe UI", 10),
-                      text_color=text_muted).pack(side=tk.LEFT)
-
-        # Удаленная сеть
-        remote_net_frame = ctk.CTkFrame(ports_frame, fg_color="transparent")
-        remote_net_frame.pack(fill=tk.X, padx=16, pady=(5, 12))
-
-        ctk.CTkLabel(remote_net_frame, text="Удаленная сеть:", width=110, anchor=tk.W,
-                      text_color=text_primary).pack(side=tk.LEFT)
-        initial_value = self.rule.remote_addresses if self.rule and self.rule.remote_addresses != "any" else ""
-        self.remote_network_var = tk.StringVar(value=initial_value)
-        ctk.CTkEntry(remote_net_frame, textvariable=self.remote_network_var, width=200,
-                     placeholder_text="192.168.1.0/24").pack(side=tk.LEFT, padx=(10, 5))
-        ctk.CTkLabel(remote_net_frame, text="(формат: IP/маска)", font=("Segoe UI", 10),
-                      text_color=text_muted).pack(side=tk.LEFT)
-
-        # Тестовые данные
-        test_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        test_frame.pack(fill=tk.X, pady=10)
-
-        ctk.CTkButton(
-            test_frame, text="🧪 Заполнить тестовыми данными",
-            command=self.fill_test_data, height=34, corner_radius=8,
-            fg_color=theme.color("accent"), hover_color=theme.color("accent_hover"),
-            font=("Segoe UI", 12)
-        ).pack(side=tk.RIGHT)
-
-        # Кнопки
+        # --- Кнопки внизу (пакуем первыми — всегда видны) ---
         btn_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        btn_frame.pack(fill=tk.X, pady=(15, 0))
+        btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(15, 0))
 
         ctk.CTkButton(
             btn_frame, text="✕ Отмена", command=self.dialog.destroy,
@@ -696,42 +545,201 @@ class FirewallRuleDialog:
             font=("Segoe UI", 13, "bold")
         ).pack(side=tk.RIGHT, padx=5)
 
+        # Заголовок
+        title_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        title_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ctk.CTkLabel(title_frame, text="📋" if not self.rule else "✏",
+                      font=("Segoe UI", 28), text_color=primary).pack(side=tk.LEFT, padx=(0, 10))
+        ctk.CTkLabel(title_frame,
+                      text="Создание правила" if not self.rule else f"Редактирование: {self.rule.name}",
+                      font=("Segoe UI", 18, "bold"), text_color=text_primary).pack(side=tk.LEFT)
+
+        def section(header_text: str, subtitle: str = "") -> ctk.CTkFrame:
+            """Создаёт секцию-card с заголовком."""
+            frame = ctk.CTkFrame(main_frame, fg_color=card_bg,
+                                  border_width=1, border_color=border_clr, corner_radius=10)
+            frame.pack(fill=tk.X, pady=(0, 10))
+            header = ctk.CTkFrame(frame, fg_color="transparent")
+            header.pack(fill=tk.X, padx=16, pady=(10, 4))
+            ctk.CTkLabel(header, text=header_text, font=("Segoe UI", 14, "bold"),
+                          text_color=text_primary, anchor="w").pack(side=tk.LEFT)
+            if subtitle:
+                ctk.CTkLabel(header, text=subtitle, font=("Segoe UI", 10),
+                              text_color=text_muted, anchor="w").pack(side=tk.LEFT, padx=(12, 0))
+            return frame
+
+        # ---- Интерфейс ----
+        interface_frame = section("🔌 Интерфейс",
+                                   "к какому порту узла привязано правило")
+
+        network_ports = [p for p in self.node.ports if p["port_type"] in ["ethernet", "pon", "wifi"]]
+
+        # Определяем текущее значение интерфейса
+        current_interface = "all"
+        if self.rule and hasattr(self.rule, 'interface'):
+            current_interface = self.rule.interface or "all"
+
+        self.interface_var = tk.StringVar(value=current_interface)
+
+        ctk.CTkRadioButton(interface_frame, text="Все интерфейсы",
+                           variable=self.interface_var, value="all").pack(
+            anchor=tk.W, padx=20, pady=2)
+
+        for port in network_ports:
+            icon = "" if port["port_type"] == "ethernet" else ("" if port["port_type"] == "pon" else "")
+            ip_info = f" ({port['ip_address']})" if port.get("ip_address") else ""
+            ctk.CTkRadioButton(interface_frame,
+                               text=f"{icon} {port['name']}{ip_info}",
+                               variable=self.interface_var,
+                               value=port["port_id"]).pack(anchor=tk.W, padx=40, pady=2)
+
+        # ---- Действие ----
+        action_frame = section("⚡ Действие",
+                                "что делаем с трафиком")
+
+        action_row = ctk.CTkFrame(action_frame, fg_color="transparent")
+        action_row.pack(fill=tk.X, padx=16, pady=(5, 10))
+
+        self.action_rule_var = tk.StringVar(value=self.rule.action if self.rule else "allow")
+        ctk.CTkRadioButton(action_row, text="Разрешить",
+                           variable=self.action_rule_var, value="allow").pack(side=tk.LEFT, padx=(10, 20))
+        ctk.CTkRadioButton(action_row, text="Блокировать",
+                           variable=self.action_rule_var, value="block").pack(side=tk.LEFT)
+
+        # ---- Источник и Назначение ----
+        addr_frame = section("🌐 Источник и Назначение",
+                              "IP-адреса или подсети (any = любой)")
+
+        # Источник
+        src_row = ctk.CTkFrame(addr_frame, fg_color="transparent")
+        src_row.pack(fill=tk.X, padx=16, pady=5)
+
+        ctk.CTkLabel(src_row, text="Источник:", width=120, anchor=tk.W,
+                      text_color=text_primary, font=("Segoe UI", 12)).pack(side=tk.LEFT)
+        initial_src = "any"
+        if self.rule:
+            initial_src = self.rule.source_address if self.rule.source_address else "any"
+        self.source_var = tk.StringVar(value=initial_src)
+        ctk.CTkEntry(src_row, textvariable=self.source_var, width=200,
+                     placeholder_text="any или 192.168.1.0/24").pack(side=tk.LEFT, padx=(10, 5))
+        ctk.CTkLabel(src_row, text="(IP, подсеть или any)", font=("Segoe UI", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
+
+        # Назначение
+        dst_row = ctk.CTkFrame(addr_frame, fg_color="transparent")
+        dst_row.pack(fill=tk.X, padx=16, pady=(5, 10))
+
+        ctk.CTkLabel(dst_row, text="Назначение:", width=120, anchor=tk.W,
+                      text_color=text_primary, font=("Segoe UI", 12)).pack(side=tk.LEFT)
+        initial_dst = "any"
+        if self.rule:
+            initial_dst = self.rule.destination_address if self.rule.destination_address else "any"
+        self.destination_var = tk.StringVar(value=initial_dst)
+        ctk.CTkEntry(dst_row, textvariable=self.destination_var, width=200,
+                     placeholder_text="any или 10.0.0.0/8").pack(side=tk.LEFT, padx=(10, 5))
+        ctk.CTkLabel(dst_row, text="(IP, подсеть или any)", font=("Segoe UI", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
+
+        # ---- Протокол и порты ----
+        ports_frame = section("🔀 Протокол и порты",
+                               "фильтр по L4-протоколу и портам")
+
+        proto_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
+        proto_row.pack(fill=tk.X, padx=16, pady=5)
+
+        ctk.CTkLabel(proto_row, text="Протокол:", width=120, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
+        self.protocol_rule_var = tk.StringVar(value=self.rule.protocol if self.rule else "any")
+
+        protocols = [("Любой", "any"), ("TCP", "tcp"), ("UDP", "udp"), ("ICMP", "icmp")]
+        for text, value in protocols:
+            ctk.CTkRadioButton(proto_row, text=text,
+                               variable=self.protocol_rule_var, value=value).pack(side=tk.LEFT, padx=5)
+
+        # Порты источника
+        src_port_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
+        src_port_row.pack(fill=tk.X, padx=16, pady=5)
+
+        ctk.CTkLabel(src_port_row, text="Порты источника:", width=120, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
+        self.source_port_var = tk.StringVar(
+            value=self.rule.source_ports if self.rule else "")
+        ctk.CTkEntry(src_port_row, textvariable=self.source_port_var, width=150,
+                     placeholder_text="1024-65535").pack(side=tk.LEFT, padx=(10, 5))
+        ctk.CTkLabel(src_port_row, text="(только TCP/UDP)", font=("Segoe UI", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
+
+        # Порты назначения
+        dst_port_row = ctk.CTkFrame(ports_frame, fg_color="transparent")
+        dst_port_row.pack(fill=tk.X, padx=16, pady=5)
+
+        ctk.CTkLabel(dst_port_row, text="Порты назначения:", width=120, anchor=tk.W,
+                      text_color=text_primary).pack(side=tk.LEFT)
+        self.destination_port_var = tk.StringVar(
+            value=self.rule.destination_ports if self.rule else "")
+        ctk.CTkEntry(dst_port_row, textvariable=self.destination_port_var, width=150,
+                     placeholder_text="80,443").pack(side=tk.LEFT, padx=(10, 5))
+        ctk.CTkLabel(dst_port_row, text="(оставьте пустым для любого)", font=("Segoe UI", 10),
+                      text_color=text_muted).pack(side=tk.LEFT)
+
+        # ---- Описание ----
+        desc_frame = section("📝 Описание")
+
+        desc_row = ctk.CTkFrame(desc_frame, fg_color="transparent")
+        desc_row.pack(fill=tk.X, padx=16, pady=(5, 10))
+
+        self.description_var = tk.StringVar(
+            value=self.rule.description if self.rule else "")
+        ctk.CTkEntry(desc_row, textvariable=self.description_var, width=500,
+                     placeholder_text="Описание правила...").pack(side=tk.LEFT, padx=(10, 5))
+
+        # Тестовые данные
+        test_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        test_frame.pack(fill=tk.X, pady=10)
+
+        ctk.CTkButton(
+            test_frame, text="🧪 Заполнить тестовыми данными",
+            command=self.fill_test_data, height=34, corner_radius=8,
+            fg_color=theme.color("accent"), hover_color=theme.color("accent_hover"),
+            font=("Segoe UI", 12)
+        ).pack(side=tk.RIGHT)
+
+        # Кнопки уже запакованы вверху через side=BOTTOM
+
     def fill_test_data(self):
         """Заполняет поля тестовыми данными."""
-        self.remote_network_var.set(f"192.168.{random.randint(1, 254)}.0/{random.choice(['24', '16', '8'])}")
-        self.local_port_var.set(str(random.randint(1024, 65535)))
-        self.remote_port_var.set(random.choice(["80", "443", "22", "3389"]))
+        self.source_var.set(f"192.168.{random.randint(1, 254)}.0/24")
+        self.destination_var.set(f"10.{random.randint(0, 254)}.0.0/16")
+        self.source_port_var.set(str(random.randint(1024, 65535)))
+        self.destination_port_var.set(random.choice(["80", "443", "22", "3389"]))
 
     def save_rule(self):
         """Сохраняет правило."""
-        local_address = "any"
-        selected_interface = self.interface_var.get()
-        if selected_interface != "any":
-            for port in self.node.ports:
-                if port["port_id"] == selected_interface:
-                    local_address = port.get("ip_address", "any")
-                    break
-
-        remote_network = self.remote_network_var.get().strip()
+        source_addr = self.source_var.get().strip() or "any"
+        destination_addr = self.destination_var.get().strip() or "any"
+        interface = self.interface_var.get()
 
         if self.rule:
             rule = self.rule
-            rule.action = self.action_var.get()
-            rule.direction = self.direction_var.get()
-            rule.protocol = self.protocol_var.get()
-            rule.local_ports = self.local_port_var.get().strip()
-            rule.remote_ports = self.remote_port_var.get().strip()
-            rule.local_addresses = local_address
-            rule.remote_addresses = remote_network if remote_network else "any"
+            rule.action = self.action_rule_var.get()
+            rule.protocol = self.protocol_rule_var.get()
+            rule.source_address = source_addr
+            rule.destination_address = destination_addr
+            rule.interface = interface
+            rule.source_ports = self.source_port_var.get().strip()
+            rule.destination_ports = self.destination_port_var.get().strip()
+            rule.description = self.description_var.get().strip()
         else:
             rule = FirewallRule(
-                direction=self.direction_var.get(),
-                action=self.action_var.get(),
-                protocol=self.protocol_var.get(),
-                local_ports=self.local_port_var.get().strip(),
-                remote_ports=self.remote_port_var.get().strip(),
-                local_addresses=local_address,
-                remote_addresses=remote_network if remote_network else "any",
+                action=self.action_rule_var.get(),
+                protocol=self.protocol_rule_var.get(),
+                source_address=source_addr,
+                destination_address=destination_addr,
+                interface=interface,
+                source_ports=self.source_port_var.get().strip(),
+                destination_ports=self.destination_port_var.get().strip(),
+                description=self.description_var.get().strip(),
                 enabled=True
             )
 

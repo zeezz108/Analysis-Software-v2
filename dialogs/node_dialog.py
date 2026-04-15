@@ -1116,7 +1116,10 @@ class NodeCreationDialog:
                 display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
                 if ver:
                     display += f" {ver}"
-                var.set(display)
+                # CPE-суффикс встраивается прямо в строку: ||vendor|product|version
+                # Паспорт безопасности парсит этот суффикс для точного поиска CVE
+                cpe_suffix = f"||{v}|{p}|{ver}"
+                var.set(display + cpe_suffix)
                 selected_label.configure(text=display, text_color="#22C55E")
 
         # --- Загрузка вендоров ---
@@ -1838,6 +1841,10 @@ class NodeCreationDialog:
             if port["port_type"] not in ["ethernet", "pon", "wifi"]:
                 continue
 
+            # WiFi-клиенты и USB не обязаны иметь IP/маску
+            is_wifi_client = (port["port_type"] == "wifi" and
+                              port.get("wifi_role", "client") == "client")
+
             port_id = port["port_id"]
 
             if port_id in self.port_vars:
@@ -1861,7 +1868,7 @@ class NodeCreationDialog:
                                      f"Неверный формат MAC-адреса для порта {port['name']}!\nФормат: 00:11:22:33:44:55")
                 return False
 
-            if required["ip"] and not ip:
+            if required["ip"] and not ip and not is_wifi_client:
                 messagebox.showerror("Ошибка", f"Для порта {port['name']} необходимо указать IP-адрес!")
                 return False
             if ip and not validate_ip(ip):
@@ -1869,7 +1876,7 @@ class NodeCreationDialog:
                                      f"Неверный формат IP-адреса для порта {port['name']}!\nФормат: 192.168.1.1")
                 return False
 
-            if required["mask"] and not mask:
+            if required["mask"] and not mask and not is_wifi_client:
                 messagebox.showerror("Ошибка", f"Для порта {port['name']} необходимо указать маску подсети!")
                 return False
             if mask and not validate_mask(mask):
@@ -2064,6 +2071,13 @@ class NodeCreationDialog:
 
             properties["hardware"] = hardware_items
             properties["software"] = software_items
+
+        # Сохраняем CPE-маппинг для точного поиска CVE в паспорте
+        if hasattr(self, '_cpe_map') and self._cpe_map:
+            properties["cpe_map"] = dict(self._cpe_map)
+
+        # Сбрасываем кеш паспорта при изменении компонентов
+        properties.pop("security_passport_cache", None)
 
         # Имя узла
         node_name = self.node_name_var.get().strip()

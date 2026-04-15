@@ -2,7 +2,7 @@
 Модуль модели файервола (Firewall)
 
 Содержит классы:
-- FirewallRule: Правило файервола
+- FirewallRule: Правило файервола (модель Source → Destination, аналог Cisco ACL)
 - FirewallManager: Менеджер правил файервола для узла
 """
 
@@ -17,27 +17,27 @@ class FirewallRule:
     """
     Класс для представления одного правила файервола.
 
-    Поддерживает:
-    - Направление (входящее/исходящее)
-    - Действие (разрешить/блокировать)
-    - Протокол (TCP/UDP/ICMP/любой)
-    - Порты (локальные и удалённые)
-    - Адреса (локальные и удалённые)
-    - Привязку к программе
+    Модель Source → Destination (аналог Cisco ACL):
+    - source_address: IP/подсеть источника трафика или "any"
+    - destination_address: IP/подсеть назначения трафика или "any"
+    - interface: port_id интерфейса узла, к которому привязано правило, или "all"
+    - source_ports: порты источника (TCP/UDP)
+    - destination_ports: порты назначения (TCP/UDP)
+    - action: разрешить/блокировать
+    - protocol: TCP/UDP/ICMP/любой
     """
 
     def __init__(
             self,
             rule_id: Optional[str] = None,
             name: str = "",
-            direction: str = "in",
             action: str = "allow",
             protocol: str = "any",
-            local_ports: str = "",
-            remote_ports: str = "",
-            local_addresses: str = "any",
-            remote_addresses: str = "any",
-            program_path: str = "",
+            source_address: str = "any",
+            destination_address: str = "any",
+            interface: str = "all",
+            source_ports: str = "",
+            destination_ports: str = "",
             enabled: bool = True,
             description: str = ""
     ):
@@ -47,27 +47,25 @@ class FirewallRule:
         Args:
             rule_id: Уникальный идентификатор (генерируется автоматически)
             name: Название правила
-            direction: Направление ("in" - входящее, "out" - исходящее)
             action: Действие ("allow" - разрешить, "block" - блокировать)
             protocol: Протокол ("any", "tcp", "udp", "icmp")
-            local_ports: Локальные порты (например, "80,443" или "5000-5010")
-            remote_ports: Удалённые порты
-            local_addresses: Локальные адреса (например, "192.168.1.0/24")
-            remote_addresses: Удалённые адреса
-            program_path: Путь к программе (если правило для программы)
+            source_address: IP/подсеть источника или "any"
+            destination_address: IP/подсеть назначения или "any"
+            interface: port_id интерфейса или "all" (все интерфейсы)
+            source_ports: Порты источника (например, "80,443" или "5000-5010")
+            destination_ports: Порты назначения
             enabled: Включено ли правило
             description: Описание правила
         """
         self.id = rule_id or uid()
         self.name = name
-        self.direction = direction
         self.action = action
         self.protocol = protocol
-        self.local_ports = local_ports
-        self.remote_ports = remote_ports
-        self.local_addresses = local_addresses
-        self.remote_addresses = remote_addresses
-        self.program_path = program_path
+        self.source_address = source_address
+        self.destination_address = destination_address
+        self.interface = interface
+        self.source_ports = source_ports
+        self.destination_ports = destination_ports
         self.enabled = enabled
         self.description = description
         self.created = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -83,14 +81,13 @@ class FirewallRule:
         return {
             "id": self.id,
             "name": self.name,
-            "direction": self.direction,
             "action": self.action,
             "protocol": self.protocol,
-            "local_ports": self.local_ports,
-            "remote_ports": self.remote_ports,
-            "local_addresses": self.local_addresses,
-            "remote_addresses": self.remote_addresses,
-            "program_path": self.program_path,
+            "source_address": self.source_address,
+            "destination_address": self.destination_address,
+            "interface": self.interface,
+            "source_ports": self.source_ports,
+            "destination_ports": self.destination_ports,
             "enabled": self.enabled,
             "description": self.description,
             "created": self.created,
@@ -102,6 +99,10 @@ class FirewallRule:
         """
         Восстанавливает правило из словаря.
 
+        Поддерживает оба формата:
+        - Новый (source_address/destination_address)
+        - Старый (direction/local_addresses/remote_addresses) — конвертируется автоматически
+
         Args:
             data: Словарь с данными правила
 
@@ -111,18 +112,46 @@ class FirewallRule:
         rule = cls()
         rule.id = data.get("id", uid())
         rule.name = data.get("name", "")
-        rule.direction = data.get("direction", "in")
         rule.action = data.get("action", "allow")
         rule.protocol = data.get("protocol", "any")
-        rule.local_ports = data.get("local_ports", "")
-        rule.remote_ports = data.get("remote_ports", "")
-        rule.local_addresses = data.get("local_addresses", "any")
-        rule.remote_addresses = data.get("remote_addresses", "any")
-        rule.program_path = data.get("program_path", "")
         rule.enabled = data.get("enabled", True)
         rule.description = data.get("description", "")
         rule.created = data.get("created", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         rule.modified = data.get("modified", rule.created)
+
+        if "source_address" in data:
+            # Новый формат — используем напрямую
+            rule.source_address = data.get("source_address", "any")
+            rule.destination_address = data.get("destination_address", "any")
+            rule.interface = data.get("interface", "all")
+            rule.source_ports = data.get("source_ports", "")
+            rule.destination_ports = data.get("destination_ports", "")
+        elif "direction" in data:
+            # Старый формат — конвертируем
+            direction = data.get("direction", "in")
+            local_addr = data.get("local_addresses", "any") or "any"
+            remote_addr = data.get("remote_addresses", "any") or "any"
+
+            if direction == "in":
+                # Входящий: remote → local  =>  source=remote, destination=local
+                rule.source_address = remote_addr
+                rule.destination_address = local_addr
+            else:
+                # Исходящий: local → remote  =>  source=local, destination=remote
+                rule.source_address = local_addr
+                rule.destination_address = remote_addr
+
+            rule.interface = "all"
+            rule.source_ports = data.get("local_ports", "") if direction == "out" else data.get("remote_ports", "")
+            rule.destination_ports = data.get("remote_ports", "") if direction == "out" else data.get("local_ports", "")
+        else:
+            # Минимальные данные
+            rule.source_address = "any"
+            rule.destination_address = "any"
+            rule.interface = "all"
+            rule.source_ports = ""
+            rule.destination_ports = ""
+
         return rule
 
     def clone(self) -> 'FirewallRule':
@@ -134,14 +163,13 @@ class FirewallRule:
         """
         return FirewallRule(
             name=f"Копия {self.name}",
-            direction=self.direction,
             action=self.action,
             protocol=self.protocol,
-            local_ports=self.local_ports,
-            remote_ports=self.remote_ports,
-            local_addresses=self.local_addresses,
-            remote_addresses=self.remote_addresses,
-            program_path=self.program_path,
+            source_address=self.source_address,
+            destination_address=self.destination_address,
+            interface=self.interface,
+            source_ports=self.source_ports,
+            destination_ports=self.destination_ports,
             enabled=self.enabled,
             description=f"Копия: {self.description}"
         )
@@ -157,36 +185,31 @@ class FirewallRule:
             return self.name
 
         # Генерируем имя на основе параметров
-        parts = []
+        src = self.source_address if self.source_address != "any" else "*"
+        dst = self.destination_address if self.destination_address != "any" else "*"
+        action_str = "разрешение" if self.action == "allow" else "блокирование"
 
-        # Направление
-        if self.direction == "in":
-            parts.append("Входящее")
-        else:
-            parts.append("Исходящее")
+        parts = [f"{src} -> {dst}"]
 
-        # Действие
-        if self.action == "allow":
-            parts.append("разрешение")
-        else:
-            parts.append("блокирование")
-
-        # Протокол и порты
         if self.protocol != "any":
             parts.append(self.protocol.upper())
 
-        if self.local_ports:
-            parts.append(f"порт {self.local_ports}")
+        if self.destination_ports:
+            parts.append(f"порт {self.destination_ports}")
+
+        parts.append(f"[{action_str}]")
 
         return " ".join(parts)
 
     def __str__(self) -> str:
         """Строковое представление правила."""
-        return f"{self.get_display_name()} [{self.action}]"
+        return self.get_display_name()
 
     def __repr__(self) -> str:
         """Представление для отладки."""
-        return f"FirewallRule(name={self.name}, direction={self.direction}, action={self.action})"
+        return (f"FirewallRule(name={self.name}, "
+                f"src={self.source_address}, dst={self.destination_address}, "
+                f"action={self.action})")
 
 
 class FirewallManager:
@@ -349,18 +372,6 @@ class FirewallManager:
         """
         return [r for r in self.rules if r.enabled]
 
-    def get_rules_by_direction(self, direction: str) -> List[FirewallRule]:
-        """
-        Возвращает правила по направлению.
-
-        Args:
-            direction: Направление ("in" или "out")
-
-        Returns:
-            Список правил с указанным направлением
-        """
-        return [r for r in self.rules if r.direction == direction]
-
     def get_rules_by_action(self, action: str) -> List[FirewallRule]:
         """
         Возвращает правила по действию.
@@ -400,8 +411,6 @@ class FirewallManager:
             "total": len(self.rules),
             "enabled": len(self.get_enabled_rules()),
             "disabled": len(self.rules) - len(self.get_enabled_rules()),
-            "incoming": len(self.get_rules_by_direction("in")),
-            "outgoing": len(self.get_rules_by_direction("out")),
             "allow": len(self.get_rules_by_action("allow")),
             "block": len(self.get_rules_by_action("block"))
         }
@@ -464,11 +473,6 @@ class FirewallManager:
         return manager
 
 
-# Константы для направлений
-DIRECTION_IN = "in"
-DIRECTION_OUT = "out"
-DIRECTIONS = [DIRECTION_IN, DIRECTION_OUT]
-
 # Константы для действий
 ACTION_ALLOW = "allow"
 ACTION_BLOCK = "block"
@@ -488,14 +492,9 @@ PROFILE_PUBLIC = "public"
 PROFILES = [PROFILE_DOMAIN, PROFILE_PRIVATE, PROFILE_PUBLIC]
 
 # Отображения для UI
-DIRECTION_DISPLAY = {
-    DIRECTION_IN: "Входящее",
-    DIRECTION_OUT: "Исходящее"
-}
-
 ACTION_DISPLAY = {
-    ACTION_ALLOW: "✅ Разрешить",
-    ACTION_BLOCK: "🚫 Блокировать"
+    ACTION_ALLOW: "Разрешить",
+    ACTION_BLOCK: "Блокировать"
 }
 
 PROTOCOL_DISPLAY = {

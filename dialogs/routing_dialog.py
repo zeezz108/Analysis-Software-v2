@@ -465,17 +465,19 @@ class RoutingTableDialog:
 
         columns = ("Тип", "Сеть назначения", "Маска", "Next-hop", "Интерфейс", "Metric", "Источник")
 
+        from utils.theme import sp
+
         style = ttk.Style()
         if ctk.get_appearance_mode() == "Dark":
             style.theme_use("clam")
             style.configure("Routing.Treeview", background="#2b2b2b", foreground="white",
-                             fieldbackground="#2b2b2b", font=("Segoe UI", 10), rowheight=26)
+                             fieldbackground="#2b2b2b", font=("Segoe UI", 10), rowheight=sp(26))
             style.configure("Routing.Treeview.Heading", background="#3b3b3b", foreground="white",
                              font=("Segoe UI", 10, "bold"))
         else:
             style.theme_use("clam")
             style.configure("Routing.Treeview", background="white", foreground="black",
-                             fieldbackground="white", font=("Segoe UI", 10), rowheight=26)
+                             fieldbackground="white", font=("Segoe UI", 10), rowheight=sp(26))
             style.configure("Routing.Treeview.Heading", background="#e0e0e0", foreground="black",
                              font=("Segoe UI", 10, "bold"))
 

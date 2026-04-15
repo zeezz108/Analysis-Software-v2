@@ -89,15 +89,10 @@ class StyledDropdown(ctk.CTkFrame):
         w = self._entry.winfo_width() + self._btn.winfo_width() + 2
 
         # Высота: min 4 элемента, max 10
-        # Popup — нативный Toplevel (не CTk), DPI не масштабирует его geometry,
-        # но элементы внутри рисуются в реальных пикселях.
-        # Используем winfo_fpixels для корректного расчёта.
-        try:
-            dpi_scale = self.winfo_fpixels('1i') / 72.0
-        except Exception:
-            dpi_scale = 1.0
+        from utils.theme import get_dpi_scale
+        dpi = get_dpi_scale()
         max_items = 10
-        item_h = int(28 * dpi_scale)
+        item_h = int(28 * dpi)
         visible = max(4, min(len(self._values), max_items))
         h = visible * item_h + 8
 
@@ -168,10 +163,15 @@ class StyledDropdown(ctk.CTkFrame):
         fg = self._resolve_color(color("text_primary"))
         hover_bg = self._resolve_color(color("card_selected"))
 
+        from utils.theme import get_dpi_scale
+        dpi = get_dpi_scale()
+        pad_x = int(10 * dpi)
+        pad_y = int(4 * dpi)
+
         for item in items:
             lbl = tk.Label(self._inner, text=item, anchor="w",
-                           bg=bg, fg=fg, font=("Segoe UI", 12),
-                           padx=12, pady=6, cursor="hand2")
+                           bg=bg, fg=fg, font=("Segoe UI", 11),
+                           padx=pad_x, pady=pad_y, cursor="hand2")
             lbl.pack(fill=tk.X)
 
             lbl.bind("<Enter>", lambda e, l=lbl: l.configure(bg=hover_bg))

@@ -67,7 +67,8 @@ class CAPECDatabase:
                 e.severity,
                 e.likelihood,
                 e.description,
-                w.cwe_id
+                w.cwe_id,
+                e.name_ru
             FROM capec_entries e
             JOIN capec_weaknesses w ON e.capec_id = w.capec_id
             WHERE w.cwe_id IN ({placeholders})
@@ -95,6 +96,7 @@ class CAPECDatabase:
                 capec_map[cid] = {
                     "capec_id": cid,
                     "name": row["name"],
+                    "name_ru": row["name_ru"] or "",
                     "abstraction": row["abstraction"],
                     "severity": row["severity"] or "",
                     "likelihood": row["likelihood"] or "",

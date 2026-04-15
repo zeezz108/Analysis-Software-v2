@@ -489,7 +489,8 @@ class PropertiesDialog:
             if v and p:
                 display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
                 if ver: display += f" {ver}"
-                var.set(display)
+                cpe_suffix = f"||{v}|{p}|{ver}"
+                var.set(display + cpe_suffix)
                 selected_label.configure(text=display, text_color="green")
 
         vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
@@ -1111,6 +1112,15 @@ class PropertiesDialog:
             self.element.properties["hardware"] = hardware_items
         if software_items:
             self.element.properties["software"] = software_items
+
+        # Сохраняем CPE-маппинг для точного поиска CVE
+        if hasattr(self, '_cpe_map') and self._cpe_map:
+            existing_map = self.element.properties.get("cpe_map", {})
+            existing_map.update(self._cpe_map)
+            self.element.properties["cpe_map"] = existing_map
+
+        # Сбрасываем кеш паспорта
+        self.element.properties.pop("security_passport_cache", None)
 
         messagebox.showinfo("Успех", f"✅ Свойства узла {self.element.name} сохранены!")
         self.dialog.destroy()

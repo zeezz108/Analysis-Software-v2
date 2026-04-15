@@ -31,15 +31,15 @@ PRESET_ARM_OFFICE = {
     "name": "АРМ-Офис",
     "type": "ARM",
     "hardware": [
-        "Процессор: Intel Core I7-12700K -",
-        "Видеоконтроллер: Nvidia Geforce Rtx 3060 -",
-        "Материнская плата: Asus Prime B660M-A -",
-        "HDD/SSD: Crucial Ct1000Mx500Ssd1 -",
+        "Процессор: Intel Core I7-12700K||intel|core_i7-12700k|",
+        "Видеоконтроллер: Nvidia Geforce Rtx 3060||nvidia|geforce_rtx_3060|",
+        "Материнская плата: Asus B150-A||asus|b150-a|",
+        "HDD/SSD: Crucial Ct1000Mx500Ssd1||crucial|ct1000mx500ssd1|",
     ],
     "software": [
-        "ОС: Microsoft Windows 10 21h2",
-        "Приложение: Microsoft Office 365",
-        "Приложение: Google Chrome",
+        "ОС: Microsoft Windows 10 21h2||microsoft|windows_10|21h2",
+        "Приложение: Microsoft Office 365||microsoft|office|365",
+        "Приложение: Google Chrome||google|chrome|",
         "Мышь: A4Tech Bloody V8",
         "Клавиатура: A4Tech Bloody B120",
         "Монитор: Dell E2420H",
@@ -63,16 +63,16 @@ PRESET_ARM_DEVELOPER = {
     "name": "АРМ-Разработчик",
     "type": "ARM",
     "hardware": [
-        "Процессор: Amd Ryzen 9 5950X -",
-        "Видеоконтроллер: Nvidia Geforce Rtx 4070 -",
-        "Материнская плата: Msi Meg X570 Ace -",
-        "HDD/SSD: Samsung 970 Evo Plus -",
+        "Процессор: Amd Ryzen 9 5950X||amd|ryzen_9_5950x|",
+        "Видеоконтроллер: Nvidia Geforce Rtx 4070||nvidia|geforce_rtx_4070|",
+        "Материнская плата: Supermicro X11SSE-F||supermicro|x11sse-f|",
+        "HDD/SSD: Samsung 850 Evo||samsung|850_evo|",
     ],
     "software": [
-        "ОС: Canonical Ubuntu Linux 22.04",
-        "Приложение: JetBrains IntelliJ IDEA",
-        "Приложение: Docker Desktop",
-        "Приложение: Mozilla Firefox",
+        "ОС: Canonical Ubuntu 22.04||canonical|ubuntu_linux|22.04",
+        "Приложение: JetBrains IntelliJ IDEA||jetbrains|intellij_idea|",
+        "Приложение: Docker Desktop||docker|docker_desktop|",
+        "Приложение: Mozilla Firefox||mozilla|firefox|",
         "Мышь: Logitech G502 Hero",
         "Клавиатура: Corsair K95 RGB",
         "Монитор: LG 27UK850",
@@ -110,10 +110,10 @@ PRESET_ROUTER = {
     "name": "Маршрутизатор",
     "type": "Router",
     "hardware": [
-        "Процессор: Intel Atom C3558 -",
+        "Процессор: Intel Atom C3558||intel|atom_c3558|",
     ],
     "software": [
-        "ОС: Cisco Ios 15.9",
+        "ОС: Cisco IOS 15.9||cisco|ios|15.9",
     ],
     "ports": [
         # WAN — к Интернету
@@ -174,31 +174,31 @@ PRESET_ROUTER = {
         "remote_network": "192.168.1.0",
         "remote_mask": "24",
     },
-    # Фаервол
+    # Фаервол (модель Source → Destination)
     "firewall": {
         "enabled": True,
         "rules": [
             {
                 "name": "Блокировать входящие извне",
-                "direction": "in",
                 "action": "block",
                 "protocol": "any",
-                "local_ports": "",
-                "remote_ports": "",
-                "local_addresses": "10.0.0.2",
-                "remote_addresses": "any",
+                "source_address": "any",
+                "destination_address": "192.168.1.0/24",
+                "interface": "eth_wan_preset",
+                "source_ports": "",
+                "destination_ports": "",
                 "enabled": True,
-                "description": "Блокировка входящего трафика на WAN-порт",
+                "description": "Блокировка входящего трафика из внешней сети в LAN через WAN-порт",
             },
             {
                 "name": "Разрешить LAN → WAN",
-                "direction": "out",
                 "action": "allow",
                 "protocol": "any",
-                "local_ports": "",
-                "remote_ports": "",
-                "local_addresses": "any",
-                "remote_addresses": "any",
+                "source_address": "192.168.1.0/24",
+                "destination_address": "any",
+                "interface": "all",
+                "source_ports": "",
+                "destination_ports": "",
                 "enabled": True,
                 "description": "Разрешить исходящий трафик из LAN",
             },
@@ -210,14 +210,14 @@ PRESET_SERVER = {
     "name": "Сервер",
     "type": "Server",
     "hardware": [
-        "Процессор: Intel Xeon E-2388G -",
-        "HDD/SSD: Samsung 870 Evo -",
+        "Процессор: Intel Xeon E-2388G||intel|xeon_e-2388g|",
+        "HDD/SSD: Samsung 840 Evo||samsung|840_evo|",
     ],
     "software": [
-        "ОС: Canonical Ubuntu Linux 22.04",
-        "Приложение: Apache HTTP Server",
-        "Приложение: PostgreSQL",
-        "Приложение: OpenSSH",
+        "ОС: Canonical Ubuntu 22.04||canonical|ubuntu_linux|22.04",
+        "Приложение: Apache HTTP Server||apache|http_server|",
+        "Приложение: PostgreSQL||postgresql|postgresql|",
+        "Приложение: OpenSSH||openbsd|openssh|",
     ],
     "ports": [
         {
@@ -331,7 +331,7 @@ def apply_preset(node, preset: dict):
         node.vpn_client_tunnel_ip = vpn_cli.get("tunnel_ip", "")
         node.vpn_client_protocol = vpn_cli.get("protocol", "WireGuard")
 
-    # Фаервол
+    # Фаервол (поддержка нового формата Source → Destination)
     fw = preset.get("firewall")
     if fw:
         node.firewall_enabled = fw.get("enabled", False)
@@ -339,19 +339,9 @@ def apply_preset(node, preset: dict):
         from utils.generators import uid
         rules = []
         for r in fw.get("rules", []):
-            rule = FirewallRule(
-                name=r.get("name", ""),
-                direction=r.get("direction", "in"),
-                action=r.get("action", "allow"),
-                protocol=r.get("protocol", "any"),
-                local_ports=r.get("local_ports", ""),
-                remote_ports=r.get("remote_ports", ""),
-                local_addresses=r.get("local_addresses", "any"),
-                remote_addresses=r.get("remote_addresses", "any"),
-                enabled=r.get("enabled", True),
-                description=r.get("description", ""),
-            )
-            rules.append(rule.__dict__)
+            # from_dict поддерживает оба формата (старый и новый)
+            rule = FirewallRule.from_dict(r)
+            rules.append(rule.to_dict())
         node.properties["firewall"] = {
             "node_id": node.id,
             "rules": rules,

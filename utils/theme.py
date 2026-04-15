@@ -21,9 +21,58 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from typing import Tuple
 
 import customtkinter as ctk
+
+
+# ---------------------------------------------------------------------------
+# DPI-масштабирование
+# ---------------------------------------------------------------------------
+# Базовое разрешение: 1920x1080 при DPI 96 (масштаб Windows 100%).
+# На экранах с высоким DPI (например 3200x2000 при 200%) все пиксельные
+# значения (rowheight, padx, width) нужно умножать на коэффициент.
+# Шрифты НЕ масштабируем — система делает это сама через DPI.
+
+_dpi_scale_cache = None
+
+
+def get_dpi_scale() -> float:
+    """Возвращает коэффициент масштабирования DPI (1.0 для 96 DPI / 1920x1080).
+
+    Результат кешируется — вычисляется один раз при первом вызове.
+    """
+    global _dpi_scale_cache
+    if _dpi_scale_cache is not None:
+        return _dpi_scale_cache
+
+    _dpi_scale_cache = 1.0
+
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            hdc = ctypes.windll.user32.GetDC(0)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+            ctypes.windll.user32.ReleaseDC(0, hdc)
+            if dpi and dpi > 0:
+                _dpi_scale_cache = dpi / 96.0
+        except Exception:
+            pass
+
+    return _dpi_scale_cache
+
+
+def sp(pixels: int) -> int:
+    """Scaled Pixels — масштабирует пиксельное значение под DPI экрана.
+
+    Использовать для: rowheight, padx/pady, width/height виджетов,
+    минимальных размеров, отступов.
+    НЕ использовать для: размеров шрифтов (система масштабирует их сама).
+
+    Пример: sp(28) → 28 на 1080p, 56 на 3200x2000@200%
+    """
+    return max(1, int(round(pixels * get_dpi_scale())))
 
 
 # ---------------------------------------------------------------------------

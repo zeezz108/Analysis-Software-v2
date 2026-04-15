@@ -862,8 +862,9 @@ class CanvasView:
         tree_frame = ctk.CTkFrame(report_window)
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 10))
 
+        from utils.theme import sp
         style = ttk.Style()
-        style.configure("Connectivity.Treeview", font=("Segoe UI", 10), rowheight=28)
+        style.configure("Connectivity.Treeview", font=("Segoe UI", 10), rowheight=sp(28))
         style.configure("Connectivity.Treeview.Heading", font=("Segoe UI", 10, "bold"))
 
         columns = ("source", "target", "status", "reason")
@@ -1510,19 +1511,8 @@ class CanvasView:
                             self.notification_enabled = data.get("notification_enabled", True)
                             from models.firewall import FirewallRule
                             for rule_data in data.get("rules", []):
-                                rule = FirewallRule()
-                                rule.id = rule_data.get("id")
-                                rule.name = rule_data.get("name", "")
-                                rule.direction = rule_data.get("direction", "in")
-                                rule.action = rule_data.get("action", "allow")
-                                rule.protocol = rule_data.get("protocol", "any")
-                                rule.local_ports = rule_data.get("local_ports", "")
-                                rule.remote_ports = rule_data.get("remote_ports", "")
-                                rule.local_addresses = rule_data.get("local_addresses", "any")
-                                rule.remote_addresses = rule_data.get("remote_addresses", "any")
-                                rule.program_path = rule_data.get("program_path", "")
-                                rule.enabled = rule_data.get("enabled", True)
-                                rule.description = rule_data.get("description", "")
+                                # from_dict поддерживает оба формата (старый и новый)
+                                rule = FirewallRule.from_dict(rule_data)
                                 self.rules.append(rule)
 
                         def add_rule(self, rule):
@@ -1552,7 +1542,8 @@ class CanvasView:
                             return False
 
                         def to_dict(self):
-                            return {"node_id": self.node_id, "rules": [r.__dict__ for r in self.rules],
+                            return {"node_id": self.node_id,
+                                    "rules": [r.to_dict() if hasattr(r, 'to_dict') else r.__dict__ for r in self.rules],
                                     "profiles": self.profiles, "firewall_enabled": self.firewall_enabled,
                                     "notification_enabled": self.notification_enabled}
 

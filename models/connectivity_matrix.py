@@ -399,78 +399,124 @@ class ConnectivityMatrix:
             )
 
     def _check_firewall_blocks(self):
-        """Проверяет, не блокирует ли файервол соединения.
+        """Применяет правила файервола по модели Source -> Destination.
 
-        Правило применяется строго направленно и только к конкретному порту
-        (интерфейсу), на котором оно настроено (промт 8 №11):
-
-        - `direction=in` на интерфейсе I блокирует трафик, приходящий на I
-          извне, т.е. пару (сосед_через_I → fw_node). Соединение fw_node →
-          сосед остаётся рабочим.
-        - `direction=out` на интерфейсе I блокирует трафик, исходящий с fw_node
-          через I, т.е. пару (fw_node → сосед_через_I).
-        - `local_addresses` — IP локального порта (или "any") — определяет,
-          к каким физическим портам применять правило.
-        - `remote_addresses` — сеть удалённой стороны; если задана, правило
-          применяется только когда сосед попадает под эту сеть.
-        - Правило НЕ распространяется на другие порты fw_node, поэтому
-          соседи, подключённые к другим интерфейсам, не затрагиваются.
+        Для каждого узла с включённым файерволом:
+        - Получаем все правила (поддерживаем как новый, так и старый формат)
+        - Для каждой пары (src, dst) с установленным соединением:
+          - Проверяем, проходит ли трафик через этот узел-файервол
+          - Правила проверяются в порядке приоритета (first match wins)
+          - source_address проверяется по IP источника
+          - destination_address проверяется по IP назначения
+          - interface ограничивает правило конкретным портом узла
+          - action=block -> помечаем BLOCKED; action=allow -> пропускаем
         """
+        from models.firewall import FirewallRule as FWRule
+
         for fw_node in self.board.nodes:
             if not fw_node.firewall_enabled:
                 continue
 
             firewall_data = fw_node.properties.get("firewall", {})
-            rules = firewall_data.get("rules", [])
+            raw_rules = firewall_data.get("rules", [])
 
-            for rule in rules:
-                if not rule.get("enabled", True):
+            # Парсим правила через from_dict (поддержка старого и нового формата)
+            parsed_rules = []
+            for r in raw_rules:
+                try:
+                    parsed_rules.append(FWRule.from_dict(r))
+                except Exception:
                     continue
-                if rule.get("action") != "block":
+
+            if not parsed_rules:
+                continue
+
+            # Собираем ID соседей fw_node (напрямую подключённых)
+            neighbor_ids: set = self._adj.get(fw_node.id, set())
+
+            # Для каждой пары в матрице, где есть активное соединение,
+            # проверяем файервол, если fw_node участвует в пути
+            for (src_id, dst_id), conn in list(self.matrix.items()):
+                if conn.status in (ConnectivityStatus.NONE, ConnectivityStatus.BLOCKED):
                     continue
 
-                direction = rule.get("direction", "in")
-                local_addr = rule.get("local_addresses", "any") or "any"
-                remote_network = rule.get("remote_addresses", "any") or "any"
-                rule_name = rule.get("name", "без имени")
+                # Проверяем: fw_node является src, dst, или транзитом
+                is_src = (src_id == fw_node.id)
+                is_dst = (dst_id == fw_node.id)
+                is_transit = (not is_src and not is_dst and
+                              fw_node.id in conn.path_nodes) if conn.path_nodes else False
 
-                # Обходим порты fw_node — ищем те, к которым применяется правило
-                for port in fw_node.ports:
-                    # Правило с local_addresses=IP применяется только к порту
-                    # с этим IP. "any" — ко всем портам с соседями.
-                    if local_addr != "any" and port.get("ip_address") != local_addr:
-                        continue
-                    neighbor_id = port.get("connected_to")
-                    if not neighbor_id:
-                        continue
-                    neighbor = self.board.find_node(neighbor_id)
-                    if not neighbor:
+                # Также проверяем: fw_node напрямую соединён и с src, и с dst
+                if not is_src and not is_dst and not is_transit:
+                    if src_id in neighbor_ids and dst_id in neighbor_ids:
+                        is_transit = True
+
+                if not (is_src or is_dst or is_transit):
+                    continue
+
+                src_node = self._node_by_id(src_id)
+                dst_node = self._node_by_id(dst_id)
+                if not src_node or not dst_node:
+                    continue
+
+                src_ip = self._get_node_ip(src_node)
+                dst_ip = self._get_node_ip(dst_node)
+
+                # First match wins
+                for rule in parsed_rules:
+                    if not rule.enabled:
                         continue
 
-                    # Проверяем, попадает ли сосед под remote_network
-                    if not self._node_matches_remote(neighbor, remote_network):
+                    # Проверяем интерфейс
+                    if rule.interface and rule.interface != "all":
+                        # Правило привязано к конкретному порту fw_node.
+                        # Трафик должен проходить через этот порт.
+                        port_data = None
+                        for p in fw_node.ports:
+                            if p.get("port_id") == rule.interface:
+                                port_data = p
+                                break
+                        if not port_data:
+                            continue
+                        # Порт должен быть связан с src или dst
+                        port_connected = port_data.get("connected_to", "")
+                        if port_connected not in (src_id, dst_id):
+                            continue
+
+                    # Проверяем source_address
+                    if not self._ip_matches_rule_addr(src_ip, rule.source_address):
                         continue
 
-                    if direction == "in":
-                        # Входящий на fw_node со стороны соседа
-                        self._apply_firewall_block(neighbor.id, fw_node.id, rule_name)
-                    elif direction == "out":
-                        # Исходящий от fw_node в сторону соседа
-                        self._apply_firewall_block(fw_node.id, neighbor.id, rule_name)
+                    # Проверяем destination_address
+                    if not self._ip_matches_rule_addr(dst_ip, rule.destination_address):
+                        continue
 
-    def _node_matches_remote(self, node: Node, remote_network: str) -> bool:
-        """Проверяет, попадает ли узел под указанную сеть назначения правила."""
-        if remote_network == "any":
+                    # Совпадение найдено — применяем действие
+                    if rule.action == "block":
+                        rule_name = rule.name or rule.get_display_name()
+                        self._apply_firewall_block(src_id, dst_id, rule_name)
+                    # First match wins — выходим из цикла правил
+                    break
+
+    def _ip_matches_rule_addr(self, node_ip: Optional[str], rule_addr: str) -> bool:
+        """Проверяет, совпадает ли IP узла с адресом из правила.
+
+        Args:
+            node_ip: IP узла (может быть "x.x.x.x" или "x.x.x.x/mask")
+            rule_addr: Адрес из правила ("any", "x.x.x.x", "x.x.x.x/mask")
+        """
+        if not rule_addr or rule_addr == "any":
             return True
-        node_ip = self._get_node_ip(node)
         if not node_ip:
             return False
+
         ip = node_ip.split('/')[0]
-        if '/' in remote_network:
-            net, mask = remote_network.split('/', 1)
+
+        if '/' in rule_addr:
+            net, mask = rule_addr.split('/', 1)
             return self._is_ip_in_network(ip, net, mask)
-        # Без маски считаем, что это конкретный IP хоста
-        return ip == remote_network
+        # Конкретный IP хоста
+        return ip == rule_addr
 
     def _apply_firewall_block(self, src_id: str, dst_id: str, rule_name: str) -> None:
         """Помечает пару (src → dst) как заблокированную, если есть связь."""

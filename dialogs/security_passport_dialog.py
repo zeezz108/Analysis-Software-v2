@@ -13,7 +13,7 @@ import threading
 import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
-from utils.theme import center_window
+from utils.theme import center_window, sp
 
 from models.node import Node
 from database.cve_db import CVEDatabase
@@ -213,33 +213,46 @@ class SecurityPassportDialog:
                 return cached
 
         try:
-            # Промт 8 №5: убран неточный keyword fallback — он путал
-            # компоненты между собой (например, «Bloody V8» и «Bloody B880»
-            # давали одинаковые CVE, потому что матч шёл по слову "bloody").
-            # Теперь ищем строго по vendor+product через CPE parser;
-            # если ничего не найдено — возвращаем пустой список.
+            # v2.1.3+: точный поиск по CPE через cpe_map (сохранён при создании узла).
+            # cpe_map хранит точные vendor/product/version из CPE-браузера,
+            # без необходимости парсить display-строку обратно.
             all_cves: List[Dict] = []
-            cpe_info = extract_cpe_components(component_name)
 
-            if cpe_info.get('vendor'):
-                product = cpe_info.get('product') or ""
-                version = cpe_info.get('version') or ""
-                cve_list = self.db.get_cves_for_component(
-                    vendor=cpe_info['vendor'],
-                    product=product,
-                    version=version
-                )
-                # Fallback 1: с version нет результатов → без version
+            # Убираем CPE-суффикс, лишние пробелы, trailing дефисы
+            clean_name = component_name.split("||")[0].strip().rstrip("- ").strip()
+
+            # 1. Ищем в таблице обратного поиска cpe_display_map (самый точный способ)
+            vendor, product, version = "", "", ""
+            try:
+                cursor = self.db._connection.cursor()
+                cursor.execute(
+                    "SELECT vendor, product, version FROM cpe_display_map WHERE display_name = ?",
+                    (clean_name,))
+                row = cursor.fetchone()
+                if row:
+                    vendor, product, version = row[0], row[1], row[2]
+            except Exception:
+                pass
+
+            # 2. Если в display_map не нашли — пробуем CPE-суффикс
+            if not vendor and "||" in component_name:
+                _, cpe_part = component_name.split("||", 1)
+                parts = cpe_part.split("|")
+                vendor = parts[0] if len(parts) > 0 else ""
+                product = parts[1] if len(parts) > 1 else ""
+                version = parts[2] if len(parts) > 2 else ""
+
+            # 3. Последний fallback — старый парсер
+            if not vendor:
+                cpe_info = extract_cpe_components(clean_name)
+                vendor = cpe_info.get('vendor', '')
+                product = cpe_info.get('product', '')
+                version = cpe_info.get('version', '')
+
+            if vendor and product:
+                cve_list = self.db.get_cves_exact(vendor, product, version)
                 if not cve_list and version:
-                    cve_list = self.db.get_cves_for_component(
-                        vendor=cpe_info['vendor'],
-                        product=product
-                    )
-                # Fallback 2: product не найден → только vendor
-                if not cve_list and product:
-                    cve_list = self.db.get_cves_for_component(
-                        vendor=cpe_info['vendor']
-                    )
+                    cve_list = self.db.get_cves_exact(vendor, product)
                 all_cves.extend(cve_list)
 
             # Убираем дубликаты по cve_id
@@ -334,15 +347,16 @@ class SecurityPassportDialog:
                     spec = f"{comp.description} для {os_label}" if os_label else comp.description
                     search_key = comp.name
                 elif comp.component_type in ("hardware", "software", "peripheral"):
-                    # Разделяем «Процессор: Intel i7» → obj=Процессор, spec=Intel i7
+                    # Разделяем «Процессор: Intel i7||vendor|product|ver»
                     if ":" in comp.name:
                         prefix, model = comp.name.split(":", 1)
                         obj_name = prefix.strip()
-                        spec = model.strip()
                         search_key = model.strip()
+                        # Для отображения убираем CPE-суффикс и trailing дефисы
+                        spec = search_key.split("||")[0].strip().rstrip("- ").strip()
                     else:
-                        spec = comp.name
                         search_key = comp.name
+                        spec = comp.name.split("||")[0].strip().rstrip("- ").strip()
                 else:
                     spec = comp.description or comp.name
                     search_key = comp.name
@@ -529,7 +543,7 @@ class SecurityPassportDialog:
         style.theme_use("clam")
 
         style.configure("Treeview", background="white", foreground="black",
-                        fieldbackground="white", font=('Segoe UI', 10), rowheight=28)
+                        fieldbackground="white", font=('Segoe UI', 10), rowheight=sp(28))
         style.configure("Treeview.Heading", background="#d9d9d9", foreground="black",
                         font=('Segoe UI', 10, 'bold'), height=30)
 
@@ -610,7 +624,7 @@ class SecurityPassportDialog:
         style = ttk.Style()
 
         style.configure("Capec.Treeview", background="white", foreground="black",
-                        fieldbackground="white", font=('Segoe UI', 10), rowheight=28)
+                        fieldbackground="white", font=('Segoe UI', 10), rowheight=sp(28))
         style.configure("Capec.Treeview.Heading", background="#d9d9d9", foreground="black",
                         font=('Segoe UI', 10, 'bold'), height=30)
 
