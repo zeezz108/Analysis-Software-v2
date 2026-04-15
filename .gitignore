@@ -13,7 +13,7 @@ database/cve_database_v2.db-wal
 database/cve_db_v1_backup.py
 
 # Локальные конфиги и рабочие материалы — не для репозитория
-.claude/
+.claude/memory/
 Promts/
 config/scaling.json
 config/theme.json
