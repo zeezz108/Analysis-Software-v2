@@ -221,7 +221,7 @@ class NodeCreationDialog:
         self.dialog = ctk.CTkToplevel(parent)
         title = "Редактирование узла" if self.is_edit_mode else "Создание нового узла"
         self.dialog.title(title)
-        self.dialog.geometry("1100x850")
+        self.dialog.geometry("1400x800")
         self.dialog.resizable(True, True)
         self.dialog.transient(parent)
         self.dialog.grab_set()
@@ -526,93 +526,377 @@ class NodeCreationDialog:
     # ========================================================================
 
     def create_widgets(self):
-        """Создаёт основной интерфейс диалога (промт-стиль2 — тёмная палитра)."""
+        """Создаёт основной интерфейс диалога — 3-панельный layout:
+        LEFT sidebar (220px) | CENTER content | RIGHT config summary (250px)."""
         from utils.theme import color, style_dialog
+        from config.node_config import ICON_FILES, RESOURCES_DIR
 
         self.dialog.configure(fg_color=color("dialog_bg"))
 
-        # Заголовок
-        title_text = "Создание нового узла" if not self.is_edit_mode else f"Редактирование узла: {self.existing_node.name}"
-        ctk.CTkLabel(
-            self.dialog, text=title_text,
-            font=("Segoe UI", 18, "bold"), text_color=color("text_primary")
-        ).pack(pady=(15, 10))
-
-        # --- Основные сведения (card с обводкой primary) ---
-        info_card = ctk.CTkFrame(self.dialog, fg_color=color("card_bg"),
-                                   border_width=2, border_color=color("primary"),
-                                   corner_radius=10)
-        info_card.pack(fill=tk.X, padx=15, pady=(0, 10))
-        info_inner = ctk.CTkFrame(info_card, fg_color="transparent")
-        info_inner.pack(fill=tk.X, padx=16, pady=12)
-
-        # Имя узла + выбор зоны в одной строке
-        row = ctk.CTkFrame(info_inner, fg_color="transparent")
-        row.pack(fill=tk.X)
-        row.grid_columnconfigure(0, weight=1, uniform="info")
-        row.grid_columnconfigure(1, weight=1, uniform="info")
-
-        # Имя
-        name_col = ctk.CTkFrame(row, fg_color="transparent")
-        name_col.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
-        ctk.CTkLabel(name_col, text="Имя узла", font=("Segoe UI", 16, "bold"),
-                      text_color=color("text_primary"), anchor="w").pack(fill=tk.X)
-
+        # --- Инициализация переменных ---
         if not hasattr(self, 'node_name_var') or not self.node_name_var:
             self.node_name_var = tk.StringVar()
             if self.is_edit_mode and self.existing_node:
                 self.node_name_var.set(self.existing_node.name)
 
-        ctk.CTkEntry(name_col, textvariable=self.node_name_var, height=36,
-                      corner_radius=8, fg_color=color("input_bg"),
-                      border_color=color("input_border"), border_width=1).pack(fill=tk.X, pady=(4, 0))
+        self._sidebar_buttons = {}
+        self._current_tab = None
+        self._config_scroll_active = False
 
-        # Зона
-        zone_col = ctk.CTkFrame(row, fg_color="transparent")
-        zone_col.grid(row=0, column=1, sticky="nsew", padx=(8, 0))
-        self.zone_frame = zone_col
+        # ============================================================
+        # MAIN 3-COLUMN LAYOUT
+        # ============================================================
+        main_container = ctk.CTkFrame(self.dialog, fg_color="transparent")
+        main_container.pack(fill=tk.BOTH, expand=True)
+        main_container.grid_columnconfigure(0, minsize=220)   # sidebar
+        main_container.grid_columnconfigure(1, weight=1)       # content
+        main_container.grid_columnconfigure(2, minsize=250)    # config summary
+        main_container.grid_rowconfigure(0, weight=1)
+
+        # ============================================================
+        # LEFT SIDEBAR (220px)
+        # ============================================================
+        sidebar = ctk.CTkFrame(main_container, fg_color=color("sidebar_bg"), corner_radius=0)
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        self._sidebar_frame = sidebar
+
+        # --- Node header: icon + type + subtitle ---
+        header_frame = ctk.CTkFrame(sidebar, fg_color="transparent")
+        header_frame.pack(fill=tk.X, padx=16, pady=(16, 8))
+
+        node_type_ru = self.preselected_type if self.preselected_type else "АРМ"
+        node_type_en = get_node_type_english(node_type_ru)
+
+        # Load node icon
+        icon_filename = ICON_FILES.get(node_type_en)
+        self._sidebar_icon_refs = []
+        if icon_filename:
+            icon_path = os.path.join(RESOURCES_DIR, icon_filename)
+            if os.path.exists(icon_path):
+                try:
+                    from PIL import Image
+                    img = Image.open(icon_path).resize((48, 48), Image.Resampling.LANCZOS)
+                    ctk_img = ctk.CTkImage(light_image=img, dark_image=img, size=(48, 48))
+                    self._sidebar_icon_refs.append(ctk_img)
+                    ctk.CTkLabel(header_frame, image=ctk_img, text="").pack(pady=(0, 6))
+                except Exception:
+                    pass
+
+        ctk.CTkLabel(header_frame, text=node_type_ru,
+                     font=("Segoe UI", 15, "bold"),
+                     text_color=color("text_primary")).pack()
+        subtitle = "Редактирование" if self.is_edit_mode else "Создание узла"
+        ctk.CTkLabel(header_frame, text=subtitle,
+                     font=("Segoe UI", 11),
+                     text_color=color("text_muted")).pack(pady=(2, 0))
+
+        # --- Name field ---
+        name_section = ctk.CTkFrame(sidebar, fg_color="transparent")
+        name_section.pack(fill=tk.X, padx=16, pady=(4, 12))
+        ctk.CTkLabel(name_section, text="Имя узла",
+                     font=("Segoe UI", 11),
+                     text_color=color("text_secondary"), anchor="w").pack(fill=tk.X)
+        ctk.CTkEntry(name_section, textvariable=self.node_name_var, height=32,
+                     corner_radius=6, fg_color=color("input_bg"),
+                     border_color=color("input_border"), border_width=1).pack(fill=tk.X, pady=(4, 0))
+
+        # --- Navigation buttons container ---
+        self._nav_container = ctk.CTkFrame(sidebar, fg_color="transparent")
+        self._nav_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=(0, 8))
+
+        # --- Zone selector at the bottom ---
+        zone_section = ctk.CTkFrame(sidebar, fg_color="transparent")
+        zone_section.pack(fill=tk.X, padx=16, pady=(0, 16), side=tk.BOTTOM)
+        self.zone_frame = zone_section
         self.update_zone_frame()
 
-        # Вкладки — фон под общую палитру
-        self.notebook = ctk.CTkTabview(self.dialog, fg_color=color("dialog_bg"),
-                                        segmented_button_fg_color=color("card_bg"),
-                                        segmented_button_selected_color=color("primary"),
-                                        segmented_button_unselected_color=color("card_bg"))
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
-        try:
-            self.notebook._segmented_button.configure(
-                font=("Segoe UI", 13, "bold"),
-                text_color=("#111827", "#E2E8F0")
-            )
-        except Exception:
-            pass
+        # ============================================================
+        # CENTER CONTENT AREA
+        # ============================================================
+        self._content_outer = ctk.CTkFrame(main_container, fg_color=color("dialog_bg"),
+                                           corner_radius=12)
+        self._content_outer.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
 
-        self.update_tabs()
+        # Section title
+        self._section_title_label = ctk.CTkLabel(
+            self._content_outer, text="",
+            font=("Segoe UI", 16, "bold"),
+            text_color=color("text_primary"), anchor="w"
+        )
+        self._section_title_label.pack(fill=tk.X, padx=16, pady=(12, 4))
 
-        # Кнопки
+        # Content frame (will be cleared/rebuilt per tab)
+        self._content_frame = ctk.CTkFrame(self._content_outer, fg_color="transparent")
+        self._content_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        # ============================================================
+        # RIGHT CONFIG SUMMARY (250px)
+        # ============================================================
+        config_panel = ctk.CTkFrame(main_container, fg_color=color("sidebar_bg"), corner_radius=0)
+        config_panel.grid(row=0, column=2, sticky="nsew")
+
+        ctk.CTkLabel(config_panel, text="Конфигурация",
+                     font=("Segoe UI", 14, "bold"),
+                     text_color=color("text_primary")).pack(padx=12, pady=(12, 8), anchor="w")
+
+        self._config_scroll = ctk.CTkScrollableFrame(
+            config_panel, fg_color="transparent"
+        )
+        self._config_scroll.pack(fill=tk.BOTH, expand=True, padx=8, pady=(0, 8))
+
+        # Mouse hover scroll control (without unbind_all)
+        def _on_config_enter(e):
+            self._config_scroll_active = True
+
+        def _on_config_leave(e):
+            self._config_scroll_active = False
+
+        self._config_scroll.bind("<Enter>", _on_config_enter)
+        self._config_scroll.bind("<Leave>", _on_config_leave)
+
+        # ============================================================
+        # BOTTOM BUTTONS (inside dialog, below 3-panel layout)
+        # ============================================================
         button_frame = ctk.CTkFrame(self.dialog, fg_color="transparent")
-        button_frame.pack(fill=tk.X, padx=15, pady=(10, 15))
-
-        ctk.CTkButton(
-            button_frame,
-            text="Сохранить" if self.is_edit_mode else "Создать",
-            command=self.create_node, font=("Segoe UI", 14, "bold"),
-            fg_color=color("success"), hover_color=color("success_hover"),
-            text_color="#FFFFFF", width=130, height=40, corner_radius=10
-        ).pack(side=tk.RIGHT, padx=(8, 0))
-
-        ctk.CTkButton(
-            button_frame, text="Отмена", command=self.dialog.destroy,
-            fg_color=color("danger"), hover_color=color("danger_hover"),
-            text_color="#FFFFFF", font=("Segoe UI", 14),
-            width=110, height=40, corner_radius=10
-        ).pack(side=tk.RIGHT)
+        button_frame.pack(fill=tk.X, padx=15, pady=(4, 12))
 
         # Кнопка загрузки пресета (слева)
         if not self.is_edit_mode:
             self._add_preset_button(button_frame)
 
+        ctk.CTkButton(
+            button_frame,
+            text="Сохранить" if self.is_edit_mode else "Создать",
+            command=self.create_node, font=("Segoe UI", 13, "bold"),
+            fg_color=color("primary"), hover_color=color("primary_hover"),
+            text_color="#FFFFFF", width=120, height=36, corner_radius=8
+        ).pack(side=tk.RIGHT, padx=(8, 0))
+
+        ctk.CTkButton(
+            button_frame, text="Отмена", command=self.dialog.destroy,
+            fg_color=color("ghost_bg"), hover_color=color("ghost_hover"),
+            text_color=color("text_primary"), font=("Segoe UI", 13),
+            width=100, height=36, corner_radius=8
+        ).pack(side=tk.RIGHT)
+
+        # ============================================================
+        # Populate sidebar tabs and show first tab
+        # ============================================================
+        self.update_tabs()
+        self._rebuild_config_summary()
         self.center_window()
+
+    # ------------------------------------------------------------------
+    # SIDEBAR NAVIGATION helpers
+    # ------------------------------------------------------------------
+
+    def _add_sidebar_tab(self, key, label, group=None):
+        """Adds a navigation button to the sidebar. `group` is used for separators."""
+        from utils.theme import color
+
+        btn = ctk.CTkButton(
+            self._nav_container, text=label,
+            font=("Segoe UI", 12), anchor="w",
+            fg_color="transparent", hover_color=color("ghost_hover"),
+            text_color=color("text_primary"),
+            height=32, corner_radius=6,
+            command=lambda k=key: self._show_tab(k)
+        )
+        btn.pack(fill=tk.X, padx=8, pady=1)
+        self._sidebar_buttons[key] = btn
+
+    def _add_sidebar_separator(self):
+        """Adds a thin divider line in the sidebar."""
+        from utils.theme import color
+        ctk.CTkFrame(self._nav_container, fg_color=color("divider"),
+                     height=1).pack(fill=tk.X, padx=16, pady=6)
+
+    def _show_tab(self, key):
+        """Switches content panel to the tab identified by `key`."""
+        from utils.theme import color
+
+        self._current_tab = key
+
+        # Update pill indicators on sidebar buttons
+        for k, btn in self._sidebar_buttons.items():
+            if k == key:
+                btn.configure(
+                    fg_color=color("ghost_hover"),
+                    border_width=0
+                )
+                # Pill indicator via left border trick — use a colored bg strip
+            else:
+                btn.configure(
+                    fg_color="transparent",
+                    border_width=0
+                )
+
+        # Clear content
+        for w in self._content_frame.winfo_children():
+            w.destroy()
+
+        # Set section title
+        self._section_title_label.configure(text=self._tab_titles.get(key, key))
+
+        # Build content for the tab
+        builder = self._tab_builders.get(key)
+        if builder:
+            builder(self._content_frame)
+
+    def _show_subtab_panel(self, parent, subtabs):
+        """Creates a sub-tab panel inside the content area.
+        subtabs: list of (label, builder_func) tuples."""
+        from utils.theme import color
+
+        if len(subtabs) <= 1:
+            if subtabs:
+                subtabs[0][1](parent)
+            return
+
+        container = ctk.CTkFrame(parent, fg_color="transparent")
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Sub-tab buttons row
+        btn_row = ctk.CTkFrame(container, fg_color="transparent")
+        btn_row.pack(fill=tk.X, padx=8, pady=(4, 8))
+
+        content_area = ctk.CTkFrame(container, fg_color="transparent")
+        content_area.pack(fill=tk.BOTH, expand=True)
+
+        subtab_btns = {}
+
+        def show_sub(label):
+            for w in content_area.winfo_children():
+                w.destroy()
+            for lbl, builder in subtabs:
+                if lbl == label:
+                    builder(content_area)
+                    break
+            for lbl, b in subtab_btns.items():
+                if lbl == label:
+                    b.configure(fg_color=color("primary"), text_color="#FFFFFF")
+                else:
+                    b.configure(fg_color=color("ghost_bg"), text_color=color("text_primary"))
+
+        for lbl, builder in subtabs:
+            b = ctk.CTkButton(
+                btn_row, text=lbl, font=("Segoe UI", 11),
+                fg_color=color("ghost_bg"), hover_color=color("ghost_hover"),
+                text_color=color("text_primary"),
+                height=28, corner_radius=6,
+                command=lambda l=lbl: show_sub(l)
+            )
+            b.pack(side=tk.LEFT, padx=2)
+            subtab_btns[lbl] = b
+
+        # Show first sub-tab
+        if subtabs:
+            show_sub(subtabs[0][0])
+
+    def _show_subtab_content(self, parent, config):
+        """Builds content for a single hardware/software/peripheral sub-tab."""
+        self._create_tab_widget(parent, config)
+
+    # ------------------------------------------------------------------
+    # CONFIG SUMMARY panel
+    # ------------------------------------------------------------------
+
+    def _rebuild_config_summary(self):
+        """Rebuilds the config summary cards in the right panel."""
+        from utils.theme import color
+
+        if not hasattr(self, '_config_scroll'):
+            return
+
+        for w in self._config_scroll.winfo_children():
+            w.destroy()
+
+        node_config = getattr(self, 'current_node_config', None)
+        if not node_config:
+            return
+
+        self._config_labels = {}
+
+        # Collect all tab configs to show
+        all_tabs = []
+        for grp in ['hardware_tabs', 'software_tabs', 'peripheral_tabs',
+                     'driver_tabs', 'hypervisor_tabs', 'host_os_tabs',
+                     'containerizer_tabs', 'guest_os_tabs']:
+            for tc in node_config.get(grp, []):
+                all_tabs.append(tc)
+
+        for tc in all_tabs:
+            card = ctk.CTkFrame(self._config_scroll, fg_color=color("card_bg"),
+                                corner_radius=8)
+            card.pack(fill=tk.X, pady=3, padx=2)
+
+            title_text = tc.get("title", tc.get("var_name", ""))
+            ctk.CTkLabel(card, text=title_text,
+                         font=("Segoe UI", 11, "bold"),
+                         text_color=color("text_secondary"),
+                         anchor="w").pack(fill=tk.X, padx=8, pady=(6, 0))
+
+            val_label = ctk.CTkLabel(card, text="не выбрано",
+                                     font=("Segoe UI", 12),
+                                     text_color=color("text_muted"),
+                                     anchor="w", wraplength=210)
+            val_label.pack(fill=tk.X, padx=8, pady=(0, 6))
+
+            self._config_labels[tc["var_name"]] = val_label
+
+        # Fill with current values
+        self._update_config_summary()
+
+    def _try_fill_config_label(self, var_name):
+        """Tries to fill a single config label from current var state."""
+        from utils.theme import color
+
+        if var_name not in self._config_labels:
+            return
+
+        label = self._config_labels[var_name]
+        value = None
+
+        # Check _var
+        var = getattr(self, f"{var_name}_var", None)
+        if var and hasattr(var, 'get'):
+            raw = var.get().strip()
+            if raw:
+                # Strip CPE suffix for display
+                if "||" in raw:
+                    value = raw.split("||")[0].strip()
+                else:
+                    value = raw
+
+        # Check _selected_items (multi-select CPE)
+        if not value:
+            items = getattr(self, f"{var_name}_selected_items", None)
+            if isinstance(items, list) and items:
+                displays = []
+                for it in items:
+                    if "||" in it:
+                        displays.append(it.split("||")[0].strip())
+                    else:
+                        displays.append(it)
+                value = ", ".join(displays)
+
+        # Check _selected (old multi-select)
+        if not value:
+            items = getattr(self, f"{var_name}_selected", None)
+            if isinstance(items, list) and items:
+                value = ", ".join(items)
+
+        if value:
+            label.configure(text=value, text_color=color("primary"))
+        else:
+            label.configure(text="не выбрано", text_color=color("text_muted"))
+
+    def _update_config_summary(self):
+        """Updates all config summary labels."""
+        if not hasattr(self, '_config_labels'):
+            return
+        for var_name in self._config_labels:
+            self._try_fill_config_label(var_name)
 
     def _add_preset_button(self, parent):
         """Добавляет кнопку с меню пресетов для быстрого заполнения."""
@@ -754,9 +1038,13 @@ class NodeCreationDialog:
             self.zone_var.set(zone_id)
 
     def update_tabs(self):
-        """Обновляет вкладки в зависимости от типа узла."""
-        for tab in self.notebook._tab_dict.copy():
-            self.notebook.delete(tab)
+        """Обновляет sidebar-навигацию в зависимости от типа узла."""
+        # Clear existing sidebar buttons
+        for w in self._nav_container.winfo_children():
+            w.destroy()
+        self._sidebar_buttons = {}
+        self._tab_builders = {}
+        self._tab_titles = {}
 
         current_display_name = self.preselected_type if self.preselected_type else "АРМ"
 
@@ -780,27 +1068,80 @@ class NodeCreationDialog:
         if not self.is_edit_mode and not self.current_ports:
             self.create_default_ports()
 
-        # Добавляем вкладки
-        if current_config.get("hardware_tabs"):
-            self.notebook.add("Аппаратная архитектура")
-            hw_frame = self.notebook.tab("Аппаратная архитектура")
-            self.create_hardware_tabs(hw_frame, current_config["hardware_tabs"])
+        first_key = None
 
-        if current_config.get("software_tabs"):
-            self.notebook.add("Программное обеспечение")
-            sw_frame = self.notebook.tab("Программное обеспечение")
-            self.create_software_tabs(sw_frame, current_config["software_tabs"])
+        # --- Hardware tabs ---
+        hw_tabs = current_config.get("hardware_tabs", [])
+        if hw_tabs:
+            for tc in hw_tabs:
+                key = f"hw_{tc['var_name']}"
+                if first_key is None:
+                    first_key = key
+                self._tab_titles[key] = tc["title"]
+                self._tab_builders[key] = lambda parent, c=tc: self._show_subtab_content(parent, c)
+                self._add_sidebar_tab(key, tc["title"], group="hardware")
 
-        if current_config.get("peripheral_tabs"):
-            self.notebook.add("Периферия")
-            per_frame = self.notebook.tab("Периферия")
-            self.create_peripheral_tabs(per_frame, current_config["peripheral_tabs"])
+        if hw_tabs:
+            self._add_sidebar_separator()
 
-        # Вкладка "Сеть" — не показываем для узла Интернет
+        # --- Software tabs ---
+        sw_tabs = current_config.get("software_tabs", [])
+        if sw_tabs:
+            for tc in sw_tabs:
+                key = f"sw_{tc['var_name']}"
+                if first_key is None:
+                    first_key = key
+                self._tab_titles[key] = tc["title"]
+                self._tab_builders[key] = lambda parent, c=tc: self._show_subtab_content(parent, c)
+                self._add_sidebar_tab(key, tc["title"], group="software")
+
+        # --- Hypervisor/Host OS/Containerizer/Guest OS tabs ---
+        for grp in ['hypervisor_tabs', 'host_os_tabs', 'containerizer_tabs', 'guest_os_tabs']:
+            grp_tabs = current_config.get(grp, [])
+            if grp_tabs:
+                for tc in grp_tabs:
+                    key = f"{grp}_{tc['var_name']}"
+                    if first_key is None:
+                        first_key = key
+                    self._tab_titles[key] = tc["title"]
+                    self._tab_builders[key] = lambda parent, c=tc: self._show_subtab_content(parent, c)
+                    self._add_sidebar_tab(key, tc["title"], group=grp)
+
+        if sw_tabs or any(current_config.get(g) for g in ['hypervisor_tabs', 'host_os_tabs', 'containerizer_tabs', 'guest_os_tabs']):
+            self._add_sidebar_separator()
+
+        # --- Peripheral tabs ---
+        per_tabs = current_config.get("peripheral_tabs", [])
+        if per_tabs:
+            for tc in per_tabs:
+                key = f"per_{tc['var_name']}"
+                if first_key is None:
+                    first_key = key
+                self._tab_titles[key] = tc["title"]
+                # Peripheral tabs use paginated_combo (no cpe_filter)
+                self._tab_builders[key] = lambda parent, c=tc: self._build_peripheral_tab(parent, c)
+                self._add_sidebar_tab(key, tc["title"], group="peripheral")
+
+        if per_tabs:
+            self._add_sidebar_separator()
+
+        # --- Network tab ---
         if current_node_type != "Internet":
-            self.notebook.add("Сеть")
-            net_frame = self.notebook.tab("Сеть")
-            self.create_network_tab(net_frame, current_config)
+            key = "network"
+            if first_key is None:
+                first_key = key
+            self._tab_titles[key] = "Сеть"
+            self._tab_builders[key] = lambda parent, c=current_config: self.create_network_tab(parent, c)
+            self._add_sidebar_tab(key, "Сеть", group="network")
+
+        # Show first tab
+        if first_key:
+            self._show_tab(first_key)
+
+    def _build_peripheral_tab(self, parent, config):
+        """Builds a peripheral tab content (uses paginated_combo)."""
+        items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
+        self.create_paginated_combo(parent, config["title"], items, config["var_name"])
 
     def create_default_ports(self):
         """Создаёт порты по умолчанию для текущего типа узла."""
@@ -895,40 +1236,16 @@ class NodeCreationDialog:
                 self.create_paginated_combo(frame, config["title"], items, config["var_name"])
 
     def create_hardware_tabs(self, parent, hardware_configs):
-        """Создаёт вкладки аппаратного обеспечения."""
-        if len(hardware_configs) > 1:
-            tabview = self._styled_subtabview(parent)
-            for config in hardware_configs:
-                tabview.add(config["title"])
-                frame = tabview.tab(config["title"])
-                self._create_tab_widget(frame, config)
-        else:
-            self._create_tab_widget(parent, hardware_configs[0])
+        """Stub — logic moved to sidebar navigation."""
+        pass
 
     def create_software_tabs(self, parent, software_configs):
-        """Создаёт вкладки программного обеспечения."""
-        if len(software_configs) > 1:
-            tabview = self._styled_subtabview(parent)
-            for config in software_configs:
-                tabview.add(config["title"])
-                frame = tabview.tab(config["title"])
-                self._create_tab_widget(frame, config)
-        else:
-            self._create_tab_widget(parent, software_configs[0])
+        """Stub — logic moved to sidebar navigation."""
+        pass
 
     def create_peripheral_tabs(self, parent, peripheral_configs):
-        """Создаёт вкладки периферийных устройств."""
-        if len(peripheral_configs) > 1:
-            tabview = self._styled_subtabview(parent)
-            for config in peripheral_configs:
-                tabview.add(config["title"])
-                frame = tabview.tab(config["title"])
-                items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-                self.create_paginated_combo(frame, config["title"], items, config["var_name"])
-        else:
-            config = peripheral_configs[0]
-            items = self.cached_data.get(self.current_node_type_key, {}).get(config["var_name"], [])
-            self.create_paginated_combo(parent, config["title"], items, config["var_name"])
+        """Stub — logic moved to sidebar navigation."""
+        pass
 
     def create_cpe_browser(self, parent, config, current_value=None):
         """Создаёт иерархический CPE-браузер.
@@ -953,13 +1270,46 @@ class NodeCreationDialog:
         has_families = bool(families_map)
         is_multiple = config.get("multiple", False)
 
-        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
-                              border_width=2, border_color=_tc("primary"),
-                              corner_radius=10)
+        frame = ctk.CTkFrame(parent, fg_color=_tc("surface"),
+                              border_width=1, border_color=_tc("card_border"),
+                              corner_radius=8)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),
                       text_color=_tc("text_primary")).pack(anchor=tk.W, padx=12, pady=(10, 12))
+
+        # Software categories support
+        software_categories = config.get("software_categories")
+        if software_categories:
+            cat_frame = ctk.CTkFrame(frame, fg_color="transparent")
+            cat_frame.pack(fill=tk.X, padx=12, pady=(0, 8))
+            ctk.CTkLabel(cat_frame, text="Категория:", font=("Segoe UI", 12, "bold"),
+                         text_color=_tc("text_primary")).pack(anchor=tk.W, pady=(0, 4))
+            cat_names = [c["name"] for c in software_categories]
+            cat_var = tk.StringVar(value=cat_names[0] if cat_names else "")
+
+            def _on_category_change(choice):
+                for cat in software_categories:
+                    if cat["name"] == choice:
+                        new_filter = cat["filter"]
+                        nonlocal vendors_filter, families_map, p_like, p_not_like, has_families
+                        vendors_filter = new_filter.get("vendors")
+                        families_map = new_filter.get("families")
+                        p_like = new_filter.get("product_like")
+                        p_not_like = new_filter.get("product_not_like")
+                        has_families = bool(families_map)
+                        # Reload vendors
+                        new_vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
+                        vendor_cb.configure(values=new_vendors)
+                        _clear_selection()
+                        break
+
+            ctk.CTkComboBox(cat_frame, values=cat_names, variable=cat_var,
+                           height=32, corner_radius=6,
+                           fg_color=_tc("input_bg"), border_color=_tc("input_border"),
+                           button_color=_tc("primary"),
+                           command=_on_category_change,
+                           state="readonly").pack(fill=tk.X)
 
         # Для single-select: одна переменная
         # Для multi-select: список выбранных + переменная текущего выбора
@@ -1001,15 +1351,20 @@ class NodeCreationDialog:
         vendor_f, vendor_var, vendor_cb, vendor_hint = _make_step(steps_container, "1. Производитель")
         vendor_f.pack(fill=tk.X, pady=(0, 6))
 
-        # === 2-4. Семейство / Продукт / Версия ===
+        # === 2-4. Семейство / Продукт / Версия (all visible at once) ===
         if has_families:
             family_f, family_var, family_cb, family_cnt = _make_step(steps_container, "2. Семейство")
+            family_f.pack(fill=tk.X, pady=(0, 6))
             product_f, product_var, product_cb, product_cnt = _make_step(steps_container, "3. Модель")
+            product_f.pack(fill=tk.X, pady=(0, 6))
             version_f, version_var, version_cb, version_cnt = _make_step(steps_container, "4. Версия")
+            version_f.pack(fill=tk.X, pady=(0, 6))
         else:
             family_f = family_var = family_cb = family_cnt = None
             product_f, product_var, product_cb, product_cnt = _make_step(steps_container, "2. Продукт")
+            product_f.pack(fill=tk.X, pady=(0, 6))
             version_f, version_var, version_cb, version_cnt = _make_step(steps_container, "3. Версия")
+            version_f.pack(fill=tk.X, pady=(0, 6))
 
         # === Нижняя панель ===
         bottom = ctk.CTkFrame(frame, fg_color="transparent")
@@ -1092,12 +1447,17 @@ class NodeCreationDialog:
                 step_frame.pack(fill=tk.X, pady=(0, 6))
 
         def _hide_from(level):
-            if level <= 2 and family_f:
-                family_f.pack_forget()
+            """Clears values from level onwards (keeps frames visible)."""
+            if level <= 2 and family_var:
+                family_var.set("")
+                if family_cb:
+                    family_cb.configure(values=[])
             if level <= 3:
-                product_f.pack_forget()
+                product_var.set("")
+                product_cb.configure(values=[])
             if level <= 4:
-                version_f.pack_forget()
+                version_var.set("")
+                version_cb.configure(values=[])
 
         def _clear_selection():
             var.set("")
@@ -1121,6 +1481,7 @@ class NodeCreationDialog:
                 cpe_suffix = f"||{v}|{p}|{ver}"
                 var.set(display + cpe_suffix)
                 selected_label.configure(text=display, text_color="#22C55E")
+            self._update_config_summary()
 
         # --- Загрузка вендоров ---
         vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
@@ -1164,7 +1525,7 @@ class NodeCreationDialog:
             cpe_state.update({"family_prefix": prefix, "product": "", "version": ""})
             product_var.set("")
             version_var.set("")
-            version_f.pack_forget()
+            version_cb.configure(values=[])
 
             products = self.db.get_products_by_prefix(cpe_state["vendor"], prefix, part=part,
                                                        product_like=p_like, product_not_like=p_not_like)
@@ -1183,10 +1544,6 @@ class NodeCreationDialog:
             versions = self.db.get_versions(vendor, product)
             version_cb.configure(values=versions)
             version_cnt.configure(text=f"{len(versions)} версий")
-            if versions:
-                _show_step(version_f)
-            else:
-                version_f.pack_forget()
             _update_display()
 
         def _on_version(*_):
@@ -1204,9 +1561,9 @@ class NodeCreationDialog:
     def create_paginated_combo(self, parent, title, items, var_name, current_value=None):
         """Создаёт комбобокс с поиском и пагинацией."""
         from utils.theme import color as _tc
-        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
-                              border_width=2, border_color=_tc("primary"),
-                              corner_radius=10)
+        frame = ctk.CTkFrame(parent, fg_color=_tc("surface"),
+                              border_width=1, border_color=_tc("card_border"),
+                              corner_radius=8)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),
@@ -1332,9 +1689,9 @@ class NodeCreationDialog:
     def create_multi_select_combo(self, parent, title, items, var_name):
         """Создаёт двухпанельный виджет множественного выбора (как в ВМ)."""
         from utils.theme import color as _tc
-        frame = ctk.CTkFrame(parent, fg_color=_tc("card_bg"),
-                              border_width=2, border_color=_tc("primary"),
-                              corner_radius=10)
+        frame = ctk.CTkFrame(parent, fg_color=_tc("surface"),
+                              border_width=1, border_color=_tc("card_border"),
+                              corner_radius=8)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
         ctk.CTkLabel(frame, text=title, font=("Segoe UI", 14, "bold"),

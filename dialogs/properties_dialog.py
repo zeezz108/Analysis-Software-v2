@@ -244,11 +244,13 @@ class PropertiesDialog:
 
         for item in properties.get("hardware", []):
             if item.startswith(f"{prefix}:"):
-                return item.replace(f"{prefix}:", "").strip()
+                val = item.replace(f"{prefix}:", "").strip()
+                return val.split("||")[0].strip().rstrip("- ").strip()
 
         for item in properties.get("software", []):
             if item.startswith(f"{prefix}:"):
-                return item.replace(f"{prefix}:", "").strip()
+                val = item.replace(f"{prefix}:", "").strip()
+                return val.split("||")[0].strip().rstrip("- ").strip()
 
         return ""
 
