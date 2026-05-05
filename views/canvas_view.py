@@ -1492,6 +1492,14 @@ class CanvasView:
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось открыть CAPEC: {str(e)}")
 
+    def show_threat_graph(self, node: Node):
+        """Открывает окно графа угроз для узла."""
+        from views.threat_graph_view import ThreatGraphView
+        try:
+            ThreatGraphView(self.root, node)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось открыть граф угроз: {str(e)}")
+
     def open_firewall(self, node: Node = None):
         import copy as _copy
         if node is None and self.selected_node_id:

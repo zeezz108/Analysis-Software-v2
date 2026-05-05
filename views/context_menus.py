@@ -104,6 +104,10 @@ class NodeContextMenuHandler:
                 label="⚔️ Паттерны атак (CAPEC)",
                 command=lambda: canvas_view.show_node_capec(node)
             )
+            menu.add_command(
+                label="🔀 Граф угроз",
+                command=lambda: canvas_view.show_threat_graph(node)
+            )
 
         # Управление ВМ (только для сервера виртуализации)
         if node.type == "VirtualizationServer":
