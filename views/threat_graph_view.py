@@ -48,9 +48,9 @@ LAYOUT_MAP = {
     GraphLevel.USER:           (3, 0),
 }
 
-COL_W = 185
-ROW_GAP = 100
-V_SPACE = 75           # расстояние между вершинами в столбце
+COL_W = 220
+ROW_GAP = 140          # зазор между рядами (для cross-row линий)
+V_SPACE = 110          # расстояние между вершинами в столбце
 V_RAD = 24
 HDR_H = 44
 PAD_T = 80
@@ -184,9 +184,63 @@ class ThreatGraphView:
         g = self._grid_step_base()
         return round(val / g) * g
 
+    def _count_cross_row_per_gap(self):
+        """Кол-во cross-row рёбер в каждом зазоре между рядами."""
+        counts = defaultdict(int)
+        seen = set()
+        for e in self.graph.edges:
+            k = (e.source_id, e.target_id)
+            if k in seen:
+                continue
+            seen.add(k)
+            sv = self._fv(e.source_id)
+            dv = self._fv(e.target_id)
+            if not sv or not dv:
+                continue
+            sr = LAYOUT_MAP.get(sv.level, (0, 0))
+            dr = LAYOUT_MAP.get(dv.level, (0, 0))
+            if sr[0] == dr[0]:
+                continue
+            # Ребро пройдёт через зазор рядом с target
+            r0 = min(sr[0], dr[0])
+            counts[r0] += 1
+        return counts
+
+    def _count_gap_edges(self):
+        """Подсчёт same-row рёбер в каждом межколоночном зазоре.
+
+        Возвращает dict: col_index → кол-во линий, проходящих через зазор
+        между столбцом col_index и col_index+1.
+        """
+        counts = defaultdict(int)
+        seen = set()
+        for e in self.graph.edges:
+            k = (e.source_id, e.target_id)
+            if k in seen:
+                continue
+            seen.add(k)
+            sv = self._fv(e.source_id)
+            dv = self._fv(e.target_id)
+            if not sv or not dv:
+                continue
+            sr = LAYOUT_MAP.get(sv.level, (0, 0))
+            dr = LAYOUT_MAP.get(dv.level, (0, 0))
+            if sr[0] != dr[0]:
+                continue
+            c1, c2 = min(sr[1], dr[1]), max(sr[1], dr[1])
+            for c in range(c1, c2):
+                counts[c] += 1
+        return counts
+
     def _layout(self):
         g = self._grid_step_base()
-        cw = self._snap(sp(COL_W))
+
+        # Адаптивная ширина: расширяем столбцы если в зазорах много линий
+        gap_counts = self._count_gap_edges()
+        max_gap = max(gap_counts.values(), default=3)
+        self._eff_col_w = max(COL_W, max_gap * 24 + V_RAD * 2 + 40)
+        cw = self._snap(sp(self._eff_col_w))
+
         vs_ = self._snap(sp(V_SPACE))
         rg = self._snap(sp(ROW_GAP))
 
@@ -195,12 +249,17 @@ class ThreatGraphView:
             row_maxv[ri] = max(
                 (len(self.graph.get_vertices_by_level(l)) for l in self._row_lvls[ri]), default=1)
 
+        # Адаптивные зазоры: много cross-row рёбер → больший зазор
+        cross_per_gap = self._count_cross_row_per_gap()
+
         row_y: Dict[int, int] = {}
         yc = self._snap(sp(PAD_T) + sp(HDR_H) + sp(15))
         for ri in sorted(self._row_lvls):
             row_y[ri] = yc
             h = (row_maxv[ri] - 1) * vs_ + self._snap(sp(V_RAD) * 2 + sp(30))
-            yc += h + rg
+            edge_count = cross_per_gap.get(ri, 0)
+            gap = self._snap(max(sp(60), sp(18) * edge_count + sp(40)))
+            yc += h + gap
 
         for lvl in self._used:
             row, col = LAYOUT_MAP.get(lvl, (0, 0))
@@ -233,8 +292,8 @@ class ThreatGraphView:
             return
         z = self._zoom
         self._draw_bg(z)
-        self._draw_edges(z)
         self._draw_verts(z)
+        self._draw_edges(z)
         self._draw_hdrs(z)
         self.cv.update_idletasks()
         bb = self.cv.bbox("all")
@@ -261,7 +320,7 @@ class ThreatGraphView:
 
     def _draw_bg(self, z):
         mode = current_mode()
-        cw = sp(COL_W)
+        cw = sp(getattr(self, '_eff_col_w', COL_W))
         hdr_h = sp(HDR_H)
         row_top, row_bot = self._calc_row_bounds(z)
         border_clr = "#888888" if mode == "light" else "#556677"
@@ -328,31 +387,41 @@ class ThreatGraphView:
             fs2 = max(7, int(9*z))
             self.cv.create_text(cx, cy+r+sp(6)*z, text=lbl, font=("Segoe UI", fs2),
                                 fill=tc, anchor="n", justify="center",
-                                width=sp(COL_W-25)*z)
+                                width=sp(getattr(self, '_eff_col_w', COL_W)-25)*z)
 
     # ------------------------------------------------------------------
-    # Edges — простые Z-маршруты с уникальными портами
+    # Edges — индивидуальная ортогональная маршрутизация
     # ------------------------------------------------------------------
 
     def _draw_edges(self, z):
-        """Каждая линия входит/выходит в уникальной точке на контуре кружка."""
+        """Каждая линия — отдельная, никогда не сливается с другими.
+
+        Алгоритм маршрутизации на основе назначения трасс:
+        1. Порты — уникальная точка входа/выхода на каждом кружке
+        2. Трассы в зазорах — сортировка по Y для минимизации пересечений
+        3. Коридоры cross-row — каждому ребру свой уникальный слот
+        4. Подписи угроз на каждой линии
+        """
         r = sp(V_RAD) * z
         drawn = set()
         edges = []
 
         for e in self.graph.edges:
             k = (e.source_id, e.target_id)
-            if k in drawn: continue
+            if k in drawn:
+                continue
             drawn.add(k)
-            if e.source_id not in self.vpos or e.target_id not in self.vpos: continue
+            if e.source_id not in self.vpos or e.target_id not in self.vpos:
+                continue
             sv = self._fv(e.source_id)
             dv = self._fv(e.target_id)
-            if not sv or not dv: continue
+            if not sv or not dv:
+                continue
             sr = LAYOUT_MAP.get(sv.level, (0, 0))
             dr = LAYOUT_MAP.get(dv.level, (0, 0))
             edges.append((e, sv, dv, sr, dr))
 
-        # Порты на контуре
+        # ── Порты на контуре кружков ──
         exit_right: Dict[str, List] = defaultdict(list)
         enter_left: Dict[str, List] = defaultdict(list)
         exit_bottom: Dict[str, List] = defaultdict(list)
@@ -361,8 +430,10 @@ class ThreatGraphView:
         enter_bottom: Dict[str, List] = defaultdict(list)
 
         for e, sv, dv, sr, dr in edges:
-            sp_ = self.vpos[sv.id]; dp = self.vpos[dv.id]
+            sp_ = self.vpos[sv.id]
+            dp = self.vpos[dv.id]
             if sr[0] == dr[0]:
+                # Один ряд — горизонтальная связь
                 if dp[0] > sp_[0]:
                     exit_right[sv.id].append(dv.id)
                     enter_left[dv.id].append(sv.id)
@@ -370,6 +441,7 @@ class ThreatGraphView:
                     exit_right[dv.id].append(sv.id)
                     enter_left[sv.id].append(dv.id)
             else:
+                # Разные ряды — вертикальная связь
                 if dp[1] > sp_[1]:
                     exit_bottom[sv.id].append(dv.id)
                     enter_top[dv.id].append(sv.id)
@@ -377,39 +449,135 @@ class ThreatGraphView:
                     exit_top[sv.id].append(dv.id)
                     enter_bottom[dv.id].append(sv.id)
 
-        PORT_SPACING = sp(10) * z
+        # Сортировка портов — стабильный порядок, консистентное расположение
+        for vid in exit_right:
+            exit_right[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[1])
+        for vid in enter_left:
+            enter_left[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[1])
+        for vid in exit_bottom:
+            exit_bottom[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[0])
+        for vid in enter_top:
+            enter_top[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[0])
+        for vid in exit_top:
+            exit_top[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[0])
+        for vid in enter_bottom:
+            enter_bottom[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[0])
+
+        GRID = sp(10) * z  # мин. расстояние между параллельными треками
+        PORT_SPACING = max(sp(15) * z, GRID + sp(2) * z)
 
         def port_y(port_list, target_id, center_y):
             n = len(port_list)
-            if n <= 1: return center_y
+            if n <= 1:
+                return center_y
             idx = port_list.index(target_id) if target_id in port_list else 0
             return center_y + (idx - (n - 1) / 2) * PORT_SPACING
 
         def port_x(port_list, target_id, center_x):
             n = len(port_list)
-            if n <= 1: return center_x
+            if n <= 1:
+                return center_x
             idx = port_list.index(target_id) if target_id in port_list else 0
             return center_x + (idx - (n - 1) / 2) * PORT_SPACING
 
-        # Слоты для Z-линий
+        # ── Same-row: КАЖДОЕ ребро получает свой слот (PCB-принцип) ──
+        # Без фильтра по dy — все рёбра проходят через gap_slots,
+        # чтобы каждая линия гарантированно имела уникальный turn_x.
         gap_groups: Dict[Tuple, List] = defaultdict(list)
         for e, sv, dv, sr, dr in edges:
-            if sr[0] != dr[0]: continue
-            sp_ = self.vpos[sv.id]; dp = self.vpos[dv.id]
-            if abs(sp_[1] - dp[1]) < 3: continue
+            if sr[0] != dr[0]:
+                continue
             c1, c2 = min(sr[1], dr[1]), max(sr[1], dr[1])
             gap_groups[(sr[0], c1, c2)].append((e.source_id, e.target_id))
+
         gap_slots = {}
         for key, pairs in gap_groups.items():
-            for i, pair in enumerate(pairs): gap_slots[pair] = i
+            pairs.sort(key=lambda p: (
+                self.vpos.get(p[0], (0, 0))[1] +
+                self.vpos.get(p[1], (0, 0))[1]) / 2)
+            for i, pair in enumerate(pairs):
+                gap_slots[pair] = i
 
+        # ── Cross-row: слоты по зазорам ──
+        # Группировка по зазору, в котором пройдёт горизонталь.
+        # Все рёбра в одном зазоре получают уникальные gap_y.
+        corridor_groups: Dict[Tuple, List] = defaultdict(list)
+        for e, sv, dv, sr, dr in edges:
+            if sr[0] == dr[0]:
+                continue
+            dp = self.vpos[dv.id]
+            sp_ = self.vpos[sv.id]
+            down = dp[1] > sp_[1]
+            if down:
+                gap_key = (max(0, dr[0] - 1), dr[0])
+            else:
+                gap_key = (dr[0], dr[0] + 1)
+            corridor_groups[gap_key].append((e, sv, dv, sr, dr))
+
+        corridor_slots = {}
+        for key, group in corridor_groups.items():
+            # Сортировка по target_x — минимизация пересечений:
+            # линии к левым целям вверху зазора, к правым — внизу
+            group.sort(key=lambda item: self.vpos[item[2].id][0])
+            for i, (e, sv, dv, sr, dr) in enumerate(group):
+                corridor_slots[(e.source_id, e.target_id)] = (i, len(group))
+
+        # ── Рисование ──
         row_top, row_bot = self._calc_row_bounds(z)
-        LINE_W = max(1.8, 2.5 * z)
-        TURN_SP = sp(14) * z
+        LINE_W = max(1.5, 2 * z)
+        TURN_SP = sp(20) * z
+        EDGE_CLR = "#333333"
+
+        # ── Резервирование треков (PCB-принцип) ──
+        # Каждый нарисованный сегмент регистрируется; следующие линии
+        # обходят занятые позиции, гарантируя отдельность каждой линии.
+        used_h = []  # занятые горизонтали: (y, x_min, x_max)
+        used_v = []  # занятые вертикали:   (x, y_min, y_max)
+
+        def _free_v(x0, y1, y2):
+            """Ближайший свободный вертикальный трек к x0."""
+            ylo, yhi = min(y1, y2), max(y1, y2)
+            for step in range(40):
+                for dx in ([0] if step == 0 else [step, -step]):
+                    x = x0 + dx * GRID
+                    ok = True
+                    for ux, uy1, uy2 in used_v:
+                        if abs(ux - x) < GRID * 0.8 and uy1 < yhi and uy2 > ylo:
+                            ok = False
+                            break
+                    if ok:
+                        return x
+            return x0
+
+        def _free_h(y0, x1, x2):
+            """Ближайший свободный горизонтальный трек к y0."""
+            xlo, xhi = min(x1, x2), max(x1, x2)
+            for step in range(40):
+                for dy in ([0] if step == 0 else [step, -step]):
+                    y = y0 + dy * GRID
+                    ok = True
+                    for uy, ux1, ux2 in used_h:
+                        if abs(uy - y) < GRID * 0.8 and ux1 < xhi and ux2 > xlo:
+                            ok = False
+                            break
+                    if ok:
+                        return y
+            return y0
+
+        def _claim(pts):
+            """Регистрирует все сегменты маршрута как занятые."""
+            for i in range(len(pts) - 1):
+                px1, py1 = pts[i]
+                px2, py2 = pts[i + 1]
+                if abs(py1 - py2) < 1:
+                    used_h.append((py1, min(px1, px2), max(px1, px2)))
+                elif abs(px1 - px2) < 1:
+                    used_v.append((px1, min(py1, py2), max(py1, py2)))
 
         for e, sv, dv, sr, dr in edges:
-            clr = _ecolor(e.threat_types)
-            sp_ = self.vpos[sv.id]; dp = self.vpos[dv.id]
+            clr = EDGE_CLR
+            sp_ = self.vpos[sv.id]
+            dp = self.vpos[dv.id]
             sx, sy = sp_[0] * z, sp_[1] * z
             tx, ty = dp[0] * z, dp[1] * z
 
@@ -425,45 +593,97 @@ class ThreatGraphView:
                     ny = port_y(enter_left[sv.id], dv.id, ty)
                     x1, x2 = sx - r, tx + r
 
-                if abs(ey - ny) < 3:
-                    self._arr([(x1, ey), (x2, ny)], clr, LINE_W, z)
+                # Идеальный turn_x из gap_slots
+                slot = gap_slots.get((e.source_id, e.target_id), 0)
+                total = len(gap_groups.get(
+                    (sr[0], min(sr[1], dr[1]), max(sr[1], dr[1])), []))
+                gap_center = (x1 + x2) / 2
+                turn_x_ideal = gap_center + (slot - (total - 1) / 2) * TURN_SP
+
+                if abs(ey - ny) < 1:
+                    pts = [(x1, ey), (x2, ey)]
                 else:
-                    slot = gap_slots.get((e.source_id, e.target_id), 0)
-                    total = len(gap_groups.get(
-                        (sr[0], min(sr[1], dr[1]), max(sr[1], dr[1])), []))
-                    gap_center = (x1 + x2) / 2
-                    turn_x = gap_center + (slot - (total - 1) / 2) * TURN_SP
-                    self._arr([(x1, ey), (turn_x, ey),
-                               (turn_x, ny), (x2, ny)], clr, LINE_W, z)
+                    # Резервируем свободный вертикальный трек
+                    turn_x = _free_v(turn_x_ideal, ey, ny)
+                    pts = [(x1, ey), (turn_x, ey),
+                           (turn_x, ny), (x2, ny)]
+
+                _claim(pts)
+                self._arr(pts, clr, LINE_W, z)
+                self._elbl(pts, e.threat_types, clr, z)
+
             else:
-                # === РАЗНЫЕ РЯДЫ ===
-                down = ty > sy
-                if down:
-                    ex = port_x(exit_bottom[sv.id], dv.id, sx)
-                    nx = port_x(enter_top[dv.id], sv.id, tx)
-                    y1, y2 = sy + r, ty - r
-                else:
-                    ex = port_x(exit_top[sv.id], dv.id, sx)
-                    nx = port_x(enter_bottom[dv.id], sv.id, tx)
-                    y1, y2 = sy - r, ty + r
+                # === РАЗНЫЕ РЯДЫ — адаптивный маршрут ===
+                pts = self._route_cross_row(
+                    sv, dv, sr, dr, sx, sy, tx, ty, r, z,
+                    exit_bottom, enter_top, exit_top, enter_bottom,
+                    port_x, corridor_slots, row_top, row_bot, TURN_SP)
 
-                if abs(ex - nx) < 5:
-                    self._arr([(ex, y1), (nx, y2)], clr, LINE_W, z)
-                else:
-                    if down:
-                        gt = row_bot.get(sr[0], sy / z) * z + sp(15) * z
-                        gb = (row_top.get(dr[0], ty / z) - sp(HDR_H)) * z - sp(15) * z
-                    else:
-                        gt = row_bot.get(dr[0], ty / z) * z + sp(15) * z
-                        gb = (row_top.get(sr[0], sy / z) - sp(HDR_H)) * z - sp(15) * z
-                    if gb < gt: gb = gt + sp(30) * z
+                # Резервируем: корректируем gap_y (горизонталь)
+                if len(pts) == 4:
+                    _ex, _ye = pts[0]
+                    _gap_y = pts[1][1]
+                    _nx, _yen = pts[3]
+                    # Горизонтальный сегмент — ищем свободный Y
+                    _gap_free = _free_h(_gap_y, min(_ex, _nx), max(_ex, _nx))
+                    pts = [(_ex, _ye), (_ex, _gap_free),
+                           (_nx, _gap_free), (_nx, _yen)]
 
-                    n_out = len(exit_bottom[sv.id] if down else exit_top[sv.id])
-                    idx = (exit_bottom[sv.id] if down else exit_top[sv.id]).index(dv.id) if dv.id in (exit_bottom[sv.id] if down else exit_top[sv.id]) else 0
-                    turn_y = (gt + gb) / 2 + (idx - (n_out - 1) / 2) * TURN_SP
+                _claim(pts)
+                self._arr(pts, clr, LINE_W, z)
+                self._elbl(pts, e.threat_types, clr, z)
 
-                    self._arr([(ex, y1), (ex, turn_y),
-                               (nx, turn_y), (nx, y2)], clr, LINE_W, z)
+    def _route_cross_row(self, sv, dv, sr, dr, sx, sy, tx, ty, r, z,
+                         exit_bottom, enter_top, exit_top, enter_bottom,
+                         port_x, corridor_slots, row_top, row_bot, TURN_SP):
+        """3-сегментный Z-route между рядами.
+
+        Горизонтальный отрезок ВСЕГДА в зазоре между соседними рядами
+        (рядом с target), где нет кружков и заголовков. Никаких
+        5-сегментных коридоров — они создают «гоночные треки».
+        """
+        down = ty > sy
+
+        if down:
+            ex = port_x(exit_bottom[sv.id], dv.id, sx)
+            nx = port_x(enter_top[dv.id], sv.id, tx)
+            y_exit = sy + r
+            y_enter = ty - r
+        else:
+            ex = port_x(exit_top[sv.id], dv.id, sx)
+            nx = port_x(enter_bottom[dv.id], sv.id, tx)
+            y_exit = sy - r
+            y_enter = ty + r
+
+        slot_i, slot_total = corridor_slots.get(
+            (sv.id, dv.id), (0, 1))
+
+        # Прямая если на одной вертикали
+        if abs(ex - nx) < 1:
+            return [(ex, y_exit), (ex, y_enter)]
+
+        # Зазор рядом с TARGET (ближайшая пара соседних рядов)
+        margin = sp(20) * z
+        if down:
+            gap_r0 = max(0, dr[0] - 1)
+            gap_r1 = dr[0]
+        else:
+            gap_r0 = dr[0]
+            gap_r1 = dr[0] + 1
+
+        gap_top = row_bot.get(gap_r0, min(sy, ty) / z) * z + margin
+        gap_bot = (row_top.get(gap_r1, max(sy, ty) / z) - sp(HDR_H)) * z - margin
+        if gap_bot <= gap_top:
+            gap_bot = gap_top + sp(40) * z
+
+        gap_y = gap_top + (slot_i + 1) * (gap_bot - gap_top) / (slot_total + 1)
+
+        return [
+            (ex, y_exit),
+            (ex, gap_y),
+            (nx, gap_y),
+            (nx, y_enter),
+        ]
 
     def _arr(self, pts, clr, lw, z):
         if len(pts) < 2: return
@@ -477,6 +697,31 @@ class ThreatGraphView:
             x2-a*math.cos(ang-.35), y2-a*math.sin(ang-.35),
             x2-a*math.cos(ang+.35), y2-a*math.sin(ang+.35),
             fill=clr, outline=clr)
+
+    def _elbl(self, pts, threats, clr, z):
+        """Подпись типа угрозы на середине первого сегмента линии."""
+        if not threats or len(pts) < 2:
+            return
+        x0, y0 = pts[0]
+        x1, y1 = pts[1]
+        seg_len = math.hypot(x1 - x0, y1 - y0)
+        if seg_len < sp(35) * z:
+            return  # слишком короткий сегмент — подпись не поместится
+        label = ",".join(threats)
+        fs = max(7, int(8 * z))
+        mx = (x0 + x1) / 2
+        my = (y0 + y1) / 2
+        off = sp(7) * z
+        if abs(x1 - x0) > abs(y1 - y0):
+            # Горизонтальный сегмент → подпись сверху от середины
+            self.cv.create_text(mx, my - off,
+                                text=label, font=("Segoe UI", fs),
+                                fill=clr, anchor="s")
+        else:
+            # Вертикальный сегмент → подпись слева от середины
+            self.cv.create_text(mx - off, my,
+                                text=label, font=("Segoe UI", fs),
+                                fill=clr, anchor="e")
 
     def _fv(self, vid):
         for v in self.graph.vertices:

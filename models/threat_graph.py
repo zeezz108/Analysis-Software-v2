@@ -626,20 +626,25 @@ class ThreatGraphBuilder:
                 self._add_edge(ev.id, phys_verts[0].id, [ThreatType.TRO])
 
         # === 2. Физический (f) → Канальный (z) ===
-        # Ethernet PHY → 802.3, ARP
+        # Ethernet PHY / сетевой адаптер → 802.3, ARP
         # Wi-Fi PHY → 802.11
         for pv in phys_verts:
             pl = pv.label.lower()
-            if "ethernet" in pl or "phy" in pl:
+            desc = pv.description.lower()
+            is_ethernet = ("ethernet" in pl or "phy" in pl
+                           or "сетевой адаптер" in desc)
+            is_wifi = "wi-fi" in pl or "wifi" in pl or "wireless" in pl
+            is_pon = "pon" in pl
+            if is_ethernet and not is_wifi and not is_pon:
                 for target in ["802.3", "arp"]:
                     dv = find(GraphLevel.DATA_LINK, target)
                     if dv:
                         self._add_edge(pv.id, dv.id, [ThreatType.CO, ThreatType.TRO])
-            if "wi-fi" in pl or "wifi" in pl:
+            if is_wifi:
                 dv = find(GraphLevel.DATA_LINK, "802.11")
                 if dv:
                     self._add_edge(pv.id, dv.id, [ThreatType.CO, ThreatType.TRO])
-            if "pon" in pl:
+            if is_pon:
                 dv = find(GraphLevel.DATA_LINK, "802.3ah")
                 if dv:
                     self._add_edge(pv.id, dv.id, [ThreatType.CO, ThreatType.TRO])
