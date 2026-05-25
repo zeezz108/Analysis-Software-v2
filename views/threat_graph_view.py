@@ -88,7 +88,14 @@ class ThreatGraphView:
 
         self.graph = ThreatGraphBuilder(node).build()
 
-        self._used = self.graph.get_used_levels()
+        # Все столбцы ряда 0 ВСЕГДА видимы (даже пустые)
+        _ROW0_ALL = [
+            GraphLevel.ENTRY_POINT, GraphLevel.PHYSICAL,
+            GraphLevel.DATA_LINK, GraphLevel.NETWORK,
+            GraphLevel.TRANSPORT, GraphLevel.SESSION,
+            GraphLevel.PRESENTATION, GraphLevel.APPLICATION,
+        ]
+        self._used = list(set(self.graph.get_used_levels()) | set(_ROW0_ALL))
         self._row_lvls: Dict[int, List[GraphLevel]] = defaultdict(list)
         for lvl in self._used:
             r, c = LAYOUT_MAP.get(lvl, (0, 0))
@@ -258,7 +265,7 @@ class ThreatGraphView:
             row_y[ri] = yc
             h = (row_maxv[ri] - 1) * vs_ + self._snap(sp(V_RAD) * 2 + sp(30))
             edge_count = cross_per_gap.get(ri, 0)
-            gap = self._snap(max(sp(60), sp(18) * edge_count + sp(40)))
+            gap = self._snap(max(sp(90), sp(18) * edge_count + sp(40)))
             yc += h + gap
 
         for lvl in self._used:
@@ -318,10 +325,19 @@ class ThreatGraphView:
                 row_bot[ri] = bot_y + sp(V_RAD) + sp(30)
         return row_top, row_bot
 
+    # Групповые заголовки (как на эталоне)
+    _GROUP_HEADERS = [
+        # (название, первый столбец, последний столбец, цвет)
+        ("Аппаратный", 1, 1, "#78716C"),
+        ("Системный уровень", 2, 4, "#0EA5E9"),
+        ("Прикладной уровень", 5, 7, "#3B82F6"),
+    ]
+
     def _draw_bg(self, z):
         mode = current_mode()
         cw = sp(getattr(self, '_eff_col_w', COL_W))
         hdr_h = sp(HDR_H)
+        grp_h = sp(30)  # высота группового заголовка
         row_top, row_bot = self._calc_row_bounds(z)
         border_clr = "#888888" if mode == "light" else "#556677"
 
@@ -329,27 +345,34 @@ class ThreatGraphView:
             row, col = LAYOUT_MAP.get(lvl, (0, 0))
             verts = self.graph.get_vertices_by_level(lvl)
             pos = [self.vpos[v.id] for v in verts if v.id in self.vpos]
-            if not pos:
-                continue
 
-            y1 = row_top.get(row, 0) * z
-            y2 = row_bot.get(row, 100) * z
-
-            if row >= 2:
-                xs = [p[0] for p in pos]
-                x1 = (min(xs) - cw * 0.4) * z
-                x2 = (max(xs) + cw * 0.4) * z
+            # Для row 0 — ВСЕГДА рисуем (даже пустой столбец)
+            if row == 0:
+                y1 = row_top.get(row, sp(PAD_T + HDR_H + 15)) * z
+                y2 = row_bot.get(row, y1 / z + sp(100)) * z
+                x1 = (sp(PAD_L) + col * cw) * z
+                x2 = x1 + cw * z
+            elif row >= 2:
+                if not pos:
+                    continue
+                y1 = row_top.get(row, 0) * z
+                y2 = row_bot.get(row, 100) * z
+                # От col 1 (Физический) до col 8 (конец Прикладного)
+                x1 = (sp(PAD_L) + 1 * cw) * z
+                x2 = (sp(PAD_L) + 8 * cw) * z
             else:
+                if not pos:
+                    continue
+                y1 = row_top.get(row, 0) * z
+                y2 = row_bot.get(row, 100) * z
                 x1 = (sp(PAD_L) + col * cw) * z
                 x2 = x1 + cw * z
 
-            # Шапка заголовка — на всю ширину столбца, сверху
+            # Шапка заголовка столбца
             base = LEVEL_COLORS.get(lvl, "#888")
             hh = hdr_h * z
-            # Фон заголовка
             self.cv.create_rectangle(x1, y1 - hh, x2, y1,
                                      fill=base, outline="")
-            # Текст заголовка
             fs = max(8, int(10 * z))
             self.cv.create_text((x1 + x2) / 2, y1 - hh / 2,
                                 text=LEVEL_LABELS.get(lvl, "?"),
@@ -360,9 +383,26 @@ class ThreatGraphView:
             fill = self._lt(base, 0.93) if mode == "light" else self._dk(base, 0.85)
             self.cv.create_rectangle(x1, y1, x2, y2, fill=fill, outline="")
 
-            # Рамка вокруг всего столбца (шапка + тело) — жирная
+            # Рамка
             self.cv.create_rectangle(x1, y1 - hh, x2, y2,
                                      fill="", outline=border_clr, width=max(2, 2.5 * z))
+
+        # ── Групповые заголовки (Аппаратный / Системный / Прикладной) ──
+        if 0 in row_top:
+            y_top = row_top[0] * z
+            gh = grp_h * z
+            fs_grp = max(9, int(12 * z))
+            for name, col_from, col_to, clr in self._GROUP_HEADERS:
+                gx1 = (sp(PAD_L) + col_from * cw) * z
+                gx2 = (sp(PAD_L) + (col_to + 1) * cw) * z
+                gy1 = y_top - hdr_h * z - gh
+                gy2 = y_top - hdr_h * z
+                self.cv.create_rectangle(gx1, gy1, gx2, gy2,
+                                         fill=clr, outline=border_clr,
+                                         width=max(1, 1.5 * z))
+                self.cv.create_text((gx1 + gx2) / 2, (gy1 + gy2) / 2,
+                                    text=name, font=("Segoe UI", fs_grp, "bold"),
+                                    fill="white", anchor="center")
 
     def _draw_hdrs(self, z):
         """Заголовки уже отрисованы в _draw_bg — пустой метод."""
@@ -463,7 +503,7 @@ class ThreatGraphView:
         for vid in enter_bottom:
             enter_bottom[vid].sort(key=lambda t: self.vpos.get(t, (0, 0))[0])
 
-        GRID = sp(10) * z  # мин. расстояние между параллельными треками
+        GRID = sp(15) * z  # мин. расстояние между параллельными треками
         PORT_SPACING = max(sp(15) * z, GRID + sp(2) * z)
 
         def port_y(port_list, target_id, center_y):
@@ -492,9 +532,9 @@ class ThreatGraphView:
 
         gap_slots = {}
         for key, pairs in gap_groups.items():
-            pairs.sort(key=lambda p: (
-                self.vpos.get(p[0], (0, 0))[1] +
-                self.vpos.get(p[1], (0, 0))[1]) / 2)
+            # Сортировка по source_y — порядок выхода совпадает
+            # с порядком входа → минимум пересечений
+            pairs.sort(key=lambda p: self.vpos.get(p[0], (0, 0))[1])
             for i, pair in enumerate(pairs):
                 gap_slots[pair] = i
 
@@ -516,9 +556,14 @@ class ThreatGraphView:
 
         corridor_slots = {}
         for key, group in corridor_groups.items():
-            # Сортировка по target_x — минимизация пересечений:
-            # линии к левым целям вверху зазора, к правым — внизу
-            group.sort(key=lambda item: self.vpos[item[2].id][0])
+            # Анти-косичка: группируем LEFT и RIGHT отдельно,
+            # внутри каждой группы — по source_x
+            def _cross_sort_key(item):
+                sx = self.vpos[item[1].id][0]
+                tx = self.vpos[item[2].id][0]
+                goes_right = 0 if tx >= sx else 1
+                return (goes_right, sx)
+            group.sort(key=_cross_sort_key)
             for i, (e, sv, dv, sr, dr) in enumerate(group):
                 corridor_slots[(e.source_id, e.target_id)] = (i, len(group))
 
@@ -603,10 +648,30 @@ class ThreatGraphView:
                 if abs(ey - ny) < 1:
                     pts = [(x1, ey), (x2, ey)]
                 else:
-                    # Резервируем свободный вертикальный трек
                     turn_x = _free_v(turn_x_ideal, ey, ny)
                     pts = [(x1, ey), (turn_x, ey),
                            (turn_x, ny), (x2, ny)]
+
+                # ── Blocker-check: кружок между source и target → обход сверху ──
+                # Выход из ВЕРХНЕГО ЦЕНТРА source, вход сверху в target.
+                col_span = abs(sr[1] - dr[1])
+                if col_span > 1 and len(pts) >= 4:
+                    _xlo = min(x1, x2)
+                    _xhi = max(x1, x2)
+                    _mid_y = (ey + ny) / 2
+                    for v in self.graph.vertices:
+                        if v.id == sv.id or v.id == dv.id:
+                            continue
+                        vp = self.vpos.get(v.id)
+                        if not vp:
+                            continue
+                        vx, vy = vp[0] * z, vp[1] * z
+                        if _xlo < vx < _xhi and abs(vy - _mid_y) < r * 4:
+                            safe_y = vy - r - sp(20) * z
+                            # Выход из TOP center, вход в TOP target
+                            pts = [(sx, sy - r), (sx, safe_y),
+                                   (tx, safe_y), (tx, ty - r)]
+                            break
 
                 _claim(pts)
                 self._arr(pts, clr, LINE_W, z)
@@ -619,15 +684,24 @@ class ThreatGraphView:
                     exit_bottom, enter_top, exit_top, enter_bottom,
                     port_x, corridor_slots, row_top, row_bot, TURN_SP)
 
-                # Резервируем: корректируем gap_y (горизонталь)
+                # Резервируем: корректируем промежуточные сегменты
                 if len(pts) == 4:
                     _ex, _ye = pts[0]
                     _gap_y = pts[1][1]
                     _nx, _yen = pts[3]
-                    # Горизонтальный сегмент — ищем свободный Y
                     _gap_free = _free_h(_gap_y, min(_ex, _nx), max(_ex, _nx))
                     pts = [(_ex, _ye), (_ex, _gap_free),
                            (_nx, _gap_free), (_nx, _yen)]
+                elif len(pts) == 5:
+                    # Обход блока: (ex,ye)→(jog,ye)→(jog,gy)→(nx,gy)→(nx,yen)
+                    _jog = pts[1][0]
+                    _gy = pts[2][1]
+                    _jog_free = _free_v(_jog, pts[0][1], _gy)
+                    _gy_free = _free_h(_gy, min(_jog_free, pts[4][0]),
+                                       max(_jog_free, pts[4][0]))
+                    pts = [pts[0], (_jog_free, pts[0][1]),
+                           (_jog_free, _gy_free),
+                           (pts[4][0], _gy_free), pts[4]]
 
                 _claim(pts)
                 self._arr(pts, clr, LINE_W, z)
@@ -677,6 +751,95 @@ class ThreatGraphView:
             gap_bot = gap_top + sp(40) * z
 
         gap_y = gap_top + (slot_i + 1) * (gap_bot - gap_top) / (slot_total + 1)
+
+        # ── Обход кружков на пути вертикали ──
+        # Проверяем ВСЕ кружки схемы (не только того же уровня).
+        # Если вертикаль от source пройдёт ЧЕРЕЗ любой кружок → обход.
+        has_blocker = False
+        max_blocker_x = ex
+        for v in self.graph.vertices:
+            if v.id == sv.id or v.id == dv.id:
+                continue
+            vp = self.vpos.get(v.id)
+            if not vp:
+                continue
+            vx, vy = vp[0] * z, vp[1] * z
+            if abs(vx - ex) < r * 2.5:
+                y_lo = min(y_exit, gap_y)
+                y_hi = max(y_exit, gap_y)
+                if y_lo < vy < y_hi:
+                    has_blocker = True
+                    max_blocker_x = max(max_blocker_x, vx)
+
+        # ── Проверка ЦЕЛЕВОЙ вертикали (gap→target) ──
+        has_target_blocker = False
+        min_blocker_x_tgt = nx
+        for v in self.graph.vertices:
+            if v.id == sv.id or v.id == dv.id:
+                continue
+            vp = self.vpos.get(v.id)
+            if not vp:
+                continue
+            vx, vy = vp[0] * z, vp[1] * z
+            if abs(vx - nx) < r * 2.5:
+                y_lo = min(gap_y, y_enter)
+                y_hi = max(gap_y, y_enter)
+                if y_lo < vy < y_hi:
+                    has_target_blocker = True
+                    min_blocker_x_tgt = min(min_blocker_x_tgt, vx)
+
+        col_diff = abs(sr[1] - dr[1])
+
+        if has_blocker or col_diff > 1:
+            # Source-side обход: выход ВПРАВО из кружка
+            jog_base = max(max_blocker_x, sx)
+            jog_x = jog_base + r + sp(5) * z + slot_i * sp(15) * z
+            local_list = exit_top[sv.id] if not down else exit_bottom[sv.id]
+            local_idx = local_list.index(dv.id) if dv.id in local_list else 0
+            local_n = len(local_list)
+            right_x = sx + r
+            right_y = sy + (local_idx - (local_n - 1) / 2) * sp(10) * z
+
+            if has_target_blocker:
+                # Target тоже заблокирован → вход СЛЕВА в target
+                enter_list = enter_top[dv.id] if down else enter_bottom[dv.id]
+                enter_idx = enter_list.index(sv.id) if sv.id in enter_list else 0
+                enter_n = len(enter_list)
+                left_x = tx - r
+                left_y = ty + (enter_idx - (enter_n - 1) / 2) * sp(10) * z
+                jog_left = min_blocker_x_tgt - r - sp(5) * z - slot_i * sp(15) * z
+                return [
+                    (right_x, right_y),
+                    (jog_x, right_y),
+                    (jog_x, gap_y),
+                    (jog_left, gap_y),
+                    (jog_left, left_y),
+                    (left_x, left_y),
+                ]
+            else:
+                return [
+                    (right_x, right_y),
+                    (jog_x, right_y),
+                    (jog_x, gap_y),
+                    (nx, gap_y),
+                    (nx, y_enter),
+                ]
+
+        if has_target_blocker:
+            # Только target заблокирован → обход СЛЕВА у target
+            enter_list = enter_top[dv.id] if down else enter_bottom[dv.id]
+            enter_idx = enter_list.index(sv.id) if sv.id in enter_list else 0
+            enter_n = len(enter_list)
+            left_x = tx - r
+            left_y = ty + (enter_idx - (enter_n - 1) / 2) * sp(10) * z
+            jog_left = min_blocker_x_tgt - r - sp(5) * z - slot_i * sp(15) * z
+            return [
+                (ex, y_exit),
+                (ex, gap_y),
+                (jog_left, gap_y),
+                (jog_left, left_y),
+                (left_x, left_y),
+            ]
 
         return [
             (ex, y_exit),

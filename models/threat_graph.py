@@ -333,20 +333,8 @@ class ThreatGraphBuilder:
             self._add_vertex(GraphLevel.DRIVERS, "Драйвер HDD/SSD",
                              "Драйвер накопителя данных")
 
-        # Модели разграничения доступа
-        if os_name:
-            self._add_vertex(GraphLevel.ACCESS_CONTROL, "Контроль доступа",
-                             f"Модель разграничения доступа ({os_name})")
-
-        # Подсистема управления файлами
-        if os_name:
-            self._add_vertex(GraphLevel.FILE_SYSTEM, "Файловая система",
-                             f"Подсистема управления файлами ({os_name})")
-
-        # Подсистема управления процессами
-        if os_name:
-            self._add_vertex(GraphLevel.PROCESS_MGMT, "Управление процессами",
-                             f"Подсистема управления процессами ({os_name})")
+        # Контроль доступа, Файловая система, Управление процессами —
+        # убраны: это предполагаемые подсистемы ОС, не реальные компоненты узла.
 
     # ------------------------------------------------------------------
     # Уровень: Транспортный (t)
@@ -366,16 +354,8 @@ class ThreatGraphBuilder:
     # ------------------------------------------------------------------
 
     def _build_session(self):
-        """Сеансовый уровень — управление сессиями."""
-        os_name = self._get_os_name()
-        has_ip = any(p.get("ip_address") for p in self.node.ports)
-
-        if has_ip:
-            self._add_vertex(GraphLevel.SESSION, "NetBIOS",
-                             "Протокол NetBIOS")
-            self._add_vertex(GraphLevel.SESSION, "RPC",
-                             "Remote Procedure Call")
-
+        """Сеансовый уровень — только реально настроенные компоненты."""
+        # VPN — только если явно включён на узле
         if self.node.vpn_client_enabled or self.node.vpn_server_enabled:
             protocol = (self.node.vpn_client_protocol
                         if self.node.vpn_client_enabled
@@ -383,28 +363,13 @@ class ThreatGraphBuilder:
             self._add_vertex(GraphLevel.SESSION, f"VPN ({protocol})",
                              f"VPN-туннель: {protocol}")
 
-        if os_name:
-            self._add_vertex(GraphLevel.SESSION, "Аутентификация",
-                             f"Подсистема аутентификации ({os_name})")
-
     # ------------------------------------------------------------------
     # Уровень: Представления (r)
     # ------------------------------------------------------------------
 
     def _build_presentation(self):
-        """Уровень представления — кодировки, шифрование."""
-        os_name = self._get_os_name()
-        has_ip = any(p.get("ip_address") for p in self.node.ports)
-
-        if has_ip:
-            self._add_vertex(GraphLevel.PRESENTATION, "SSL/TLS",
-                             "Шифрование соединений")
-
-        if os_name:
-            self._add_vertex(GraphLevel.PRESENTATION, "Кодировки данных",
-                             "Преобразование форматов данных")
-
-        # Антивирус (СЗИ) — на уровне представления
+        """Уровень представления — только реально установленное ПО."""
+        # СЗИ (антивирус и т.п.) — только если явно в software
         for item in self.node.properties.get("software", []):
             if item.startswith("СЗИ:"):
                 name = item.split(":", 1)[1].strip()
@@ -461,44 +426,9 @@ class ThreatGraphBuilder:
     # ------------------------------------------------------------------
 
     def _build_net_apps(self):
-        """Сетевые приложения — протоколы прикладного уровня сети."""
-        has_ip = any(p.get("ip_address") for p in self.node.ports)
-        if not has_ip:
-            return
-
-        # Стандартные сетевые службы
-        self._add_vertex(GraphLevel.NET_APPS, "DNS",
-                         "Domain Name System")
-        self._add_vertex(GraphLevel.NET_APPS, "DHCP",
-                         "Dynamic Host Configuration Protocol")
-        self._add_vertex(GraphLevel.NET_APPS, "HTTP/HTTPS",
-                         "Web-протокол")
-
-        # SMB/CIFS для Windows
-        os_name = self._get_os_name()
-        if os_name and ("windows" in os_name.lower()):
-            self._add_vertex(GraphLevel.NET_APPS, "SMB/CIFS",
-                             "Server Message Block")
-
-        # SSH для Linux/серверов
-        if os_name and ("linux" in os_name.lower() or
-                        "ubuntu" in os_name.lower() or
-                        "debian" in os_name.lower() or
-                        "centos" in os_name.lower()):
-            self._add_vertex(GraphLevel.NET_APPS, "SSH",
-                             "Secure Shell")
-
-        # FTP, SMTP и т.д. для серверов
-        if self.node.type in ("Server", "VirtualizationServer"):
-            self._add_vertex(GraphLevel.NET_APPS, "FTP",
-                             "File Transfer Protocol")
-            self._add_vertex(GraphLevel.NET_APPS, "SMTP",
-                             "Simple Mail Transfer Protocol")
-
-        # SNMP для маршрутизаторов/коммутаторов
-        if self.node.type in ("Router", "Switch"):
-            self._add_vertex(GraphLevel.NET_APPS, "SNMP",
-                             "Simple Network Management Protocol")
+        """Сетевые приложения — убраны: это предполагаемые службы,
+        не реальные компоненты узла."""
+        pass
 
     # ------------------------------------------------------------------
     # Уровень: Аппаратный (h)
