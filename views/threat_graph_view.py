@@ -20,6 +20,7 @@ from models.threat_graph import (
     GraphLevel, LEVEL_LABELS, ThreatType,
 )
 from utils.theme import color, c, sp, current_mode
+from models.fstec_criticality import assess_component, get_criticality_color, get_criticality_level
 
 
 # ============================================================================
@@ -85,23 +86,50 @@ class ThreatGraphView:
         self.node = node
         self.vpos: Dict[str, Tuple[float, float]] = {}
         self._zoom = 1.0
+        self._assessments: Dict[str, object] = {}  # vertex_id → FSTECAssessment
 
         self.graph = ThreatGraphBuilder(node).build()
 
-        # Все столбцы ряда 0 ВСЕГДА видимы (даже пустые)
-        _ROW0_ALL = [
+        # Только реально используемые уровни — без принудительного показа пустых
+        self._used = list(self.graph.get_used_levels())
+
+        # Канонический порядок строки 0 (OSI)
+        _ROW0_ORDER = [
             GraphLevel.ENTRY_POINT, GraphLevel.PHYSICAL,
             GraphLevel.DATA_LINK, GraphLevel.NETWORK,
             GraphLevel.TRANSPORT, GraphLevel.SESSION,
             GraphLevel.PRESENTATION, GraphLevel.APPLICATION,
         ]
-        self._used = list(set(self.graph.get_used_levels()) | set(_ROW0_ALL))
+        # Только те из них, которые реально присутствуют — в правильном порядке
+        row0_used = [l for l in _ROW0_ORDER if l in self._used]
+        self._n_cols = max(len(row0_used), 1)
+
+        # Динамическая нумерация столбцов: logical_level → visual_col_index
+        self._dyn_col: Dict = {l: i for i, l in enumerate(row0_used)}
+
+        # Строки 1: каждый уровень привязывается к ближайшему ЛЕВОМУ row-0 столбцу
+        _ROW0_BY_ORIG = {LAYOUT_MAP[l][1]: l for l in _ROW0_ORDER}
+        for lvl in self._used:
+            row, orig_col = LAYOUT_MAP.get(lvl, (0, 0))
+            if row != 1 or lvl in self._dyn_col:
+                continue
+            # Берём ближайший row-0 уровень, который есть, и col ≤ orig_col
+            left_candidates = [l for l in row0_used if LAYOUT_MAP[l][1] <= orig_col]
+            if left_candidates:
+                anchor = max(left_candidates, key=lambda l: LAYOUT_MAP[l][1])
+            elif row0_used:
+                anchor = row0_used[0]
+            else:
+                self._dyn_col[lvl] = 0
+                continue
+            self._dyn_col[lvl] = self._dyn_col[anchor]
+
         self._row_lvls: Dict[int, List[GraphLevel]] = defaultdict(list)
         for lvl in self._used:
-            r, c = LAYOUT_MAP.get(lvl, (0, 0))
+            r, _ = LAYOUT_MAP.get(lvl, (0, 0))
             self._row_lvls[r].append(lvl)
         for r in self._row_lvls:
-            self._row_lvls[r].sort(key=lambda l: LAYOUT_MAP.get(l, (0, 0))[1])
+            self._row_lvls[r].sort(key=lambda l: self._dyn_col.get(l, LAYOUT_MAP.get(l, (0, 0))[1]))
 
         self.window = ctk.CTkToplevel(parent)
         self.window.title(f"Граф угроз: {node.name}")
@@ -151,6 +179,18 @@ class ThreatGraphView:
         ctk.CTkButton(zf, text="Сброс", width=sp(50), height=sp(28),
                        command=self._zrst).pack(side=tk.LEFT, padx=(4, 0))
 
+        self._crit_btn = ctk.CTkButton(
+            h, text="Оценить критичность", width=sp(170), height=sp(30),
+            fg_color="#B71C1C", hover_color="#D32F2F", text_color="#FFF",
+            command=self._run_fstec_assessment)
+        self._crit_btn.pack(side=tk.RIGHT, padx=(0, sp(10)))
+
+        self._table_btn = ctk.CTkButton(
+            h, text="Таблица", width=sp(80), height=sp(30),
+            fg_color="#555", hover_color="#777", text_color="#FFF",
+            state="disabled", command=self._show_criticality_table)
+        self._table_btn.pack(side=tk.RIGHT, padx=(0, sp(4)))
+
         cf = ctk.CTkFrame(self.window)
         cf.pack(fill=tk.BOTH, expand=True, padx=sp(10), pady=(sp(4), sp(2)))
         bg = "#FFFFFF" if mode == "light" else "#131A2B"
@@ -178,6 +218,7 @@ class ThreatGraphView:
                        fg_color=color("danger"), hover_color=color("danger_hover"),
                        command=self._close).pack(side=tk.RIGHT, padx=sp(8))
 
+
     # ------------------------------------------------------------------
     # Layout — ВСЕ координаты привязаны к сетке
     # ------------------------------------------------------------------
@@ -190,6 +231,12 @@ class ThreatGraphView:
         """Привязывает значение к сетке."""
         g = self._grid_step_base()
         return round(val / g) * g
+
+    def _lvl_pos(self, lvl) -> Tuple[int, int]:
+        """(row, dynamic_col) для уровня — использует _dyn_col вместо статичного LAYOUT_MAP."""
+        row = LAYOUT_MAP.get(lvl, (0, 0))[0]
+        col = self._dyn_col.get(lvl, LAYOUT_MAP.get(lvl, (0, 0))[1])
+        return (row, col)
 
     def _count_cross_row_per_gap(self):
         """Кол-во cross-row рёбер в каждом зазоре между рядами."""
@@ -204,21 +251,16 @@ class ThreatGraphView:
             dv = self._fv(e.target_id)
             if not sv or not dv:
                 continue
-            sr = LAYOUT_MAP.get(sv.level, (0, 0))
-            dr = LAYOUT_MAP.get(dv.level, (0, 0))
+            sr = self._lvl_pos(sv.level)
+            dr = self._lvl_pos(dv.level)
             if sr[0] == dr[0]:
                 continue
-            # Ребро пройдёт через зазор рядом с target
             r0 = min(sr[0], dr[0])
             counts[r0] += 1
         return counts
 
     def _count_gap_edges(self):
-        """Подсчёт same-row рёбер в каждом межколоночном зазоре.
-
-        Возвращает dict: col_index → кол-во линий, проходящих через зазор
-        между столбцом col_index и col_index+1.
-        """
+        """Подсчёт same-row рёбер в каждом межколоночном зазоре (динамические col)."""
         counts = defaultdict(int)
         seen = set()
         for e in self.graph.edges:
@@ -230,8 +272,8 @@ class ThreatGraphView:
             dv = self._fv(e.target_id)
             if not sv or not dv:
                 continue
-            sr = LAYOUT_MAP.get(sv.level, (0, 0))
-            dr = LAYOUT_MAP.get(dv.level, (0, 0))
+            sr = self._lvl_pos(sv.level)
+            dr = self._lvl_pos(dv.level)
             if sr[0] != dr[0]:
                 continue
             c1, c2 = min(sr[1], dr[1]), max(sr[1], dr[1])
@@ -263,23 +305,29 @@ class ThreatGraphView:
         yc = self._snap(sp(PAD_T) + sp(HDR_H) + sp(15))
         for ri in sorted(self._row_lvls):
             row_y[ri] = yc
-            h = (row_maxv[ri] - 1) * vs_ + self._snap(sp(V_RAD) * 2 + sp(30))
+            # Для ri>=2 узлы горизонтальные (один y на всех), высота = 1 узел
+            eff_maxv = 1 if ri >= 2 else row_maxv[ri]
+            h = (eff_maxv - 1) * vs_ + self._snap(sp(V_RAD) * 2 + sp(30))
             edge_count = cross_per_gap.get(ri, 0)
             gap = self._snap(max(sp(90), sp(18) * edge_count + sp(40)))
             yc += h + gap
 
         for lvl in self._used:
-            row, col = LAYOUT_MAP.get(lvl, (0, 0))
+            row, col = self._lvl_pos(lvl)
             verts = self.graph.get_vertices_by_level(lvl)
             n = len(verts)
 
             if row >= 2:
-                total_cols = 8
-                tw = total_cols * cw
-                sx = self._snap(sp(PAD_L) + (tw - (n - 1) * cw) // 2)
+                tw = self._n_cols * cw
+                pad_x = self._snap(sp(V_RAD + 30))
                 y = row_y.get(row, 500)
-                for i, v in enumerate(verts):
-                    self.vpos[v.id] = (sx + i * cw, y)
+                if n == 1:
+                    self.vpos[verts[0].id] = (self._snap(sp(PAD_L) + tw // 2), y)
+                else:
+                    step = (tw - 2 * pad_x) // (n - 1)
+                    for i, v in enumerate(verts):
+                        x = self._snap(sp(PAD_L) + pad_x + i * step)
+                        self.vpos[v.id] = (x, y)
             else:
                 cx = self._snap(sp(PAD_L) + col * cw + cw // 2)
                 mv = row_maxv.get(row, 1)
@@ -325,13 +373,24 @@ class ThreatGraphView:
                 row_bot[ri] = bot_y + sp(V_RAD) + sp(30)
         return row_top, row_bot
 
-    # Групповые заголовки (как на эталоне)
-    _GROUP_HEADERS = [
-        # (название, первый столбец, последний столбец, цвет)
-        ("Аппаратный", 1, 1, "#78716C"),
-        ("Системный уровень", 2, 4, "#0EA5E9"),
-        ("Прикладной уровень", 5, 7, "#3B82F6"),
-    ]
+    def _group_headers(self):
+        """Групповые заголовки — только для реально отображаемых столбцов."""
+        headers = []
+        # Аппаратный = только Physical
+        pc = self._dyn_col.get(GraphLevel.PHYSICAL)
+        if pc is not None:
+            headers.append(("Аппаратный", pc, pc, "#78716C"))
+        # Системный = DataLink..Transport (те что есть)
+        sys_lvls = [GraphLevel.DATA_LINK, GraphLevel.NETWORK, GraphLevel.TRANSPORT]
+        sc = [self._dyn_col[l] for l in sys_lvls if l in self._dyn_col]
+        if sc:
+            headers.append(("Системный уровень", min(sc), max(sc), "#0EA5E9"))
+        # Прикладной = Session..Application (те что есть)
+        app_lvls = [GraphLevel.SESSION, GraphLevel.PRESENTATION, GraphLevel.APPLICATION]
+        ac = [self._dyn_col[l] for l in app_lvls if l in self._dyn_col]
+        if ac:
+            headers.append(("Прикладной уровень", min(ac), max(ac), "#3B82F6"))
+        return headers
 
     def _draw_bg(self, z):
         mode = current_mode()
@@ -342,12 +401,14 @@ class ThreatGraphView:
         border_clr = "#888888" if mode == "light" else "#556677"
 
         for lvl in self._used:
-            row, col = LAYOUT_MAP.get(lvl, (0, 0))
+            row, col = self._lvl_pos(lvl)
             verts = self.graph.get_vertices_by_level(lvl)
             pos = [self.vpos[v.id] for v in verts if v.id in self.vpos]
 
-            # Для row 0 — ВСЕГДА рисуем (даже пустой столбец)
             if row == 0:
+                # Рисуем только если есть вершины (не показываем пустые столбцы)
+                if not pos:
+                    continue
                 y1 = row_top.get(row, sp(PAD_T + HDR_H + 15)) * z
                 y2 = row_bot.get(row, y1 / z + sp(100)) * z
                 x1 = (sp(PAD_L) + col * cw) * z
@@ -357,9 +418,9 @@ class ThreatGraphView:
                     continue
                 y1 = row_top.get(row, 0) * z
                 y2 = row_bot.get(row, 100) * z
-                # От col 1 (Физический) до col 8 (конец Прикладного)
-                x1 = (sp(PAD_L) + 1 * cw) * z
-                x2 = (sp(PAD_L) + 8 * cw) * z
+                # Полная ширина — полоса на весь холст
+                x1 = sp(PAD_L) * z
+                x2 = (sp(PAD_L) + self._n_cols * cw) * z
             else:
                 if not pos:
                     continue
@@ -387,12 +448,12 @@ class ThreatGraphView:
             self.cv.create_rectangle(x1, y1 - hh, x2, y2,
                                      fill="", outline=border_clr, width=max(2, 2.5 * z))
 
-        # ── Групповые заголовки (Аппаратный / Системный / Прикладной) ──
+        # ── Групповые заголовки — только реальные столбцы ──
         if 0 in row_top:
             y_top = row_top[0] * z
             gh = grp_h * z
             fs_grp = max(9, int(12 * z))
-            for name, col_from, col_to, clr in self._GROUP_HEADERS:
+            for name, col_from, col_to, clr in self._group_headers():
                 gx1 = (sp(PAD_L) + col_from * cw) * z
                 gx2 = (sp(PAD_L) + (col_to + 1) * cw) * z
                 gy1 = y_top - hdr_h * z - gh
@@ -418,6 +479,14 @@ class ThreatGraphView:
             cx, cy = p[0]*z, p[1]*z
             lc = LEVEL_COLORS.get(v.level, "#888")
             fl = "#FFF" if mode == "light" else self._dk(lc, 0.7)
+            # Раскраска по ФСТЭК-оценке (после нажатия «Оценить критичность»)
+            if self._assessments:
+                assess = self._assessments.get(v.id)
+                if assess and assess.V > 0:
+                    fl = assess.color
+                else:
+                    fl = "#38A169"  # зелёный — нет CVE
+                lc = "#333333"
             self.cv.create_oval(cx-r, cy-r, cx+r, cy+r, fill=fl, outline=lc,
                                 width=max(2, 2.5*z))
             fs = max(8, int(11*z))
@@ -457,8 +526,8 @@ class ThreatGraphView:
             dv = self._fv(e.target_id)
             if not sv or not dv:
                 continue
-            sr = LAYOUT_MAP.get(sv.level, (0, 0))
-            dr = LAYOUT_MAP.get(dv.level, (0, 0))
+            sr = self._lvl_pos(sv.level)
+            dr = self._lvl_pos(dv.level)
             edges.append((e, sv, dv, sr, dr))
 
         # ── Порты на контуре кружков ──
@@ -890,6 +959,270 @@ class ThreatGraphView:
         for v in self.graph.vertices:
             if v.id == vid: return v
         return None
+
+    # ------------------------------------------------------------------
+    # ФСТЭК: оценка критичности уязвимостей
+    # ------------------------------------------------------------------
+
+    def _run_fstec_assessment(self):
+        """Поиск CVE и расчёт V по методике ФСТЭК для каждого компонента."""
+        import threading
+        import queue as _queue
+
+        self._crit_btn.configure(text="Поиск CVE…", state="disabled")
+        q = _queue.Queue()
+
+        def _worker():
+            try:
+                from database.cve_db import CVEDatabase
+                from utils.cpe_utils import extract_cpe_components
+                db = CVEDatabase()
+
+                # Определяем доступность из интернета
+                is_internet = self.node.type in ("Router", "Internet") or any(
+                    p.get("port_type") == "wan" or "wan" in p.get("name", "").lower()
+                    for p in self.node.ports)
+
+                total = len(self.graph.vertices)
+                for idx, v in enumerate(self.graph.vertices):
+                    q.put(("progress", idx + 1, total))
+                    if not v.component_name:
+                        continue
+                    # Поиск CVE через CPE
+                    cpe = extract_cpe_components(v.component_name)
+                    if not cpe or not cpe.get("vendor"):
+                        continue
+                    cves = db.get_cves_for_component(
+                        cpe.get("vendor", ""), cpe.get("product", ""),
+                        cpe.get("version", ""))
+                    if not cves:
+                        continue
+                    # Расчёт V по ФСТЭК
+                    assessment = assess_component(
+                        self.node.type, cves, is_internet)
+                    self._assessments[v.id] = assessment
+
+                q.put(("done",))
+            except Exception as ex:
+                q.put(("error", str(ex)))
+
+        def _poll():
+            try:
+                while True:
+                    msg = q.get_nowait()
+                    if msg[0] == "done":
+                        found = sum(1 for a in self._assessments.values() if a.V > 0)
+                        self._crit_btn.configure(
+                            text=f"Оценено: {found}", state="disabled")
+                        self._draw()
+                        self._bind_right_click()
+                        self._table_btn.configure(state="normal")
+                        return
+                    elif msg[0] == "error":
+                        self._crit_btn.configure(
+                            text="Ошибка", state="disabled")
+                        return
+                    elif msg[0] == "progress":
+                        self._crit_btn.configure(
+                            text=f"CVE… {msg[1]}/{msg[2]}")
+            except _queue.Empty:
+                pass
+            try:
+                if self.window.winfo_exists():
+                    self.window.after(100, _poll)
+            except Exception:
+                pass
+
+        threading.Thread(target=_worker, daemon=True).start()
+        self.window.after(100, _poll)
+
+    def _bind_right_click(self):
+        """Привязка правого клика на кружки для показа оценки."""
+        self.cv.bind("<Button-3>", self._on_right_click)
+
+    def _on_right_click(self, event):
+        """Показ окна с расчётом ФСТЭК при правом клике на кружок."""
+        cx = self.cv.canvasx(event.x)
+        cy = self.cv.canvasy(event.y)
+        z = self._zoom
+        r = sp(V_RAD) * z
+
+        for v in self.graph.vertices:
+            p = self.vpos.get(v.id)
+            if not p:
+                continue
+            vx, vy = p[0] * z, p[1] * z
+            if (cx - vx) ** 2 + (cy - vy) ** 2 <= (r * 1.3) ** 2:
+                assess = self._assessments.get(v.id)
+                if assess:
+                    self._show_assessment(v, assess)
+                else:
+                    from tkinter import messagebox
+                    messagebox.showinfo("ФСТЭК",
+                        f"{v.id}: {v.label}\n\nНет данных об уязвимостях.")
+                return
+
+    def _show_assessment(self, v, assess):
+        """Окно с детальным расчётом V по методике ФСТЭК."""
+        win = ctk.CTkToplevel(self.window)
+        win.title(f"Оценка критичности: {v.label}")
+        win.geometry("500x520")
+        win.transient(self.window)
+
+        clr = assess.color
+
+        frame = ctk.CTkFrame(win, fg_color="transparent")
+        frame.pack(fill=tk.BOTH, expand=True, padx=15, pady=10)
+
+        # Заголовок
+        ctk.CTkLabel(frame, text=f"{v.id}: {v.label}",
+                     font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        ctk.CTkLabel(frame, text=f"CVE: {assess.cve_id}  |  CVSS: {assess.cvss_score}  |  Всего CVE: {assess.cve_count}",
+                     font=("Segoe UI", 13)).pack(anchor="w", pady=(2, 8))
+
+        # Результат
+        res_frame = ctk.CTkFrame(frame, fg_color=clr, corner_radius=8)
+        res_frame.pack(fill=tk.X, pady=(0, 10))
+        ctk.CTkLabel(res_frame, text=f"V = {assess.V:.2f}  —  {assess.level}",
+                     font=("Segoe UI", 18, "bold"), text_color="white"
+                     ).pack(padx=15, pady=10)
+
+        # Формула
+        lines = [
+            "V = I_cvss × I_infr × (I_at + I_imp)",
+            "",
+            f"I_cvss = {assess.cvss_score}  (макс. CVSS из CVE)",
+            "",
+            f"I_infr = k×K + l×L + p×P",
+            f"  K = {assess.K:.1f} ({assess.k_category})  ×  k=0.5  →  {0.5*assess.K:.2f}",
+            f"  L = {assess.L:.1f}  ×  l=0.2  →  {0.2*assess.L:.2f}",
+            f"  P = {assess.P:.1f} ({'из Интернета' if assess.is_internet_facing else 'внутренний'})  ×  p=0.3  →  {0.3*assess.P:.2f}",
+            f"  I_infr = {assess.I_infr:.4f}",
+            "",
+            f"I_at = e×E",
+            f"  E = {assess.E:.1f} ({assess.e_category})  ×  e=1.0  →  {assess.I_at:.2f}",
+            "",
+            f"I_imp = h×H",
+            f"  H = {assess.H:.2f} ({assess.h_category})  ×  h=1.0  →  {assess.I_imp:.2f}",
+            "",
+            f"V = {assess.cvss_score} × {assess.I_infr:.4f} × ({assess.I_at:.2f} + {assess.I_imp:.2f})",
+            f"V = {assess.V:.2f}",
+        ]
+
+        text = ctk.CTkTextbox(frame, font=("Consolas", 12), height=300)
+        text.pack(fill=tk.BOTH, expand=True)
+        text.insert("end", "\n".join(lines))
+        text.configure(state="disabled")
+
+        ctk.CTkButton(frame, text="Закрыть", command=win.destroy,
+                       width=100).pack(pady=(8, 0))
+
+    def _show_criticality_table(self):
+        """Таблица уязвимых элементов — Treeview как в Excel."""
+        win = ctk.CTkToplevel(self.window)
+        win.title(f"Оценка критичности: {self.node.name}")
+        win.geometry("1100x650")
+        win.transient(self.window)
+
+        from utils.theme import current_mode
+        mode = current_mode()
+
+        frame = ctk.CTkFrame(win, fg_color="transparent")
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        ctk.CTkLabel(frame, text=f"Узел: {self.node.name} ({self._tru()})",
+                     font=("Segoe UI", 16, "bold")).pack(anchor="w", pady=(0, 5))
+        total_cve = sum(1 for a in self._assessments.values() if a.V > 0)
+        ctk.CTkLabel(frame, text=f"Компонентов с CVE: {total_cve} из {len(self.graph.vertices)}",
+                     font=("Segoe UI", 12)).pack(anchor="w", pady=(0, 8))
+
+        # Treeview
+        cols = ("level", "component", "cvss", "v_score", "cve_id", "cve_count")
+        style = ttk.Style()
+        style.configure("Crit.Treeview", font=("Segoe UI", 10), rowheight=26)
+        style.configure("Crit.Treeview.Heading", font=("Segoe UI", 10, "bold"))
+
+        tree_frame = ctk.CTkFrame(frame)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+
+        tree = ttk.Treeview(tree_frame, columns=cols, show="tree headings",
+                            style="Crit.Treeview", selectmode="browse")
+
+        tree.heading("#0", text="Критичность")
+        tree.heading("level", text="Уровень")
+        tree.heading("component", text="Компонент")
+        tree.heading("cvss", text="CVSS")
+        tree.heading("v_score", text="V (ФСТЭК)")
+        tree.heading("cve_id", text="CVE")
+        tree.heading("cve_count", text="Кол-во CVE")
+
+        tree.column("#0", width=250, minwidth=200)
+        tree.column("level", width=180, minwidth=140)
+        tree.column("component", width=220, minwidth=160)
+        tree.column("cvss", width=70, minwidth=50, anchor="center")
+        tree.column("v_score", width=90, minwidth=70, anchor="center")
+        tree.column("cve_id", width=160, minwidth=120)
+        tree.column("cve_count", width=90, minwidth=60, anchor="center")
+
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.pack(fill=tk.BOTH, expand=True)
+
+        # Тэги для цветов строк
+        tree.tag_configure("critical", background="#FEE2E2", foreground="#991B1B")
+        tree.tag_configure("high", background="#FED7AA", foreground="#9A3412")
+        tree.tag_configure("medium", background="#FEF3C7", foreground="#92400E")
+        tree.tag_configure("low", background="#D1FAE5", foreground="#065F46")
+        tree.tag_configure("none", background="#F3F4F6", foreground="#374151")
+        tree.tag_configure("group", font=("Segoe UI", 11, "bold"))
+
+        # Уровни критичности
+        CRIT_GROUPS = [
+            ("critical", "🔴 Критический (V > 8.0)", lambda v: v > 8.0),
+            ("high", "🟠 Высокий (5.0 ≤ V ≤ 8.0)", lambda v: 5.0 <= v <= 8.0),
+            ("medium", "🟡 Средний (2.0 ≤ V < 5.0)", lambda v: 2.0 <= v < 5.0),
+            ("low", "🟢 Низкий (V < 2.0)", lambda v: 0 < v < 2.0),
+        ]
+
+        for tag, group_name, crit_fn in CRIT_GROUPS:
+            items = []
+            for v in self.graph.vertices:
+                a = self._assessments.get(v.id)
+                if a and crit_fn(a.V):
+                    items.append((v, a))
+            if not items:
+                continue
+            items.sort(key=lambda x: -x[1].V)
+
+            gid = tree.insert("", "end", text=f"{group_name}  ({len(items)})",
+                              tags=("group",))
+            for v, a in items:
+                lvl_name = LEVEL_LABELS.get(v.level, "?").replace("\n", " ")
+                tree.insert(gid, "end", text="",
+                            values=(lvl_name, v.label, a.cvss_score,
+                                    f"{a.V:.2f}", a.cve_id, a.cve_count),
+                            tags=(tag,))
+
+        # Без CVE
+        no_cve = [v for v in self.graph.vertices
+                  if v.id not in self._assessments or self._assessments[v.id].V == 0]
+        if no_cve:
+            gid = tree.insert("", "end",
+                              text=f"✅ Без уязвимостей  ({len(no_cve)})",
+                              tags=("group",))
+            for v in no_cve:
+                lvl_name = LEVEL_LABELS.get(v.level, "?").replace("\n", " ")
+                tree.insert(gid, "end", text="",
+                            values=(lvl_name, v.label, "—", "—", "—", "0"),
+                            tags=("none",))
+
+        # Раскрываем все группы
+        for item in tree.get_children():
+            tree.item(item, open=True)
+
+        ctk.CTkButton(frame, text="Закрыть", command=win.destroy,
+                       width=100).pack(pady=(8, 0))
 
     # Zoom
     def _zin(self):
