@@ -2426,6 +2426,33 @@ class NodeCreationDialog:
                             else:
                                 software_items.append(value)
 
+            # В режиме редактирования: сохраняем данные из вкладок, которые
+            # пользователь НЕ открывал (ленивая загрузка не создала _var атрибуты).
+            # Сравниваем по префиксу "Категория:" — если категория уже есть в
+            # собранных items, она была изменена → не трогаем. Иначе берём оригинал.
+            if self.is_edit_mode and self.existing_node:
+                def _merge_preserved(collected: list, original: list) -> list:
+                    collected_prefixes = set()
+                    for item in collected:
+                        if ":" in item:
+                            collected_prefixes.add(item.split(":", 1)[0].strip())
+                    for item in original:
+                        if not item:
+                            continue
+                        prefix = item.split(":", 1)[0].strip() if ":" in item else ""
+                        if prefix not in collected_prefixes:
+                            collected.append(item)
+                    return collected
+
+                hardware_items = _merge_preserved(
+                    hardware_items,
+                    self.existing_node.properties.get("hardware", [])
+                )
+                software_items = _merge_preserved(
+                    software_items,
+                    self.existing_node.properties.get("software", [])
+                )
+
             properties["hardware"] = hardware_items
             properties["software"] = software_items
 

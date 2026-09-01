@@ -576,6 +576,92 @@ COMMON_COMPONENT_MAPPING = {
 }
 
 
+# ── Маппинг сетевых протоколов → реализации с CVE в NVD ──────────────────
+# Источник: NVD NIST — каждый протокол привязан к ПО, в котором он реализован
+# и которое имеет реальные CVE-записи.
+PROTOCOL_CVE_MAP: Dict[str, Dict[str, str]] = {
+    # ── Канальный уровень ──
+    "ieee 802.3":   {"vendor": "microsoft",  "product": "windows"},           # Ethernet-драйвер
+    "ieee 802.11":  {"vendor": "intel",       "product": "proset\\/wireless_software"},  # Wi-Fi драйвер
+    "ieee 802.15":  {"vendor": "linux",       "product": "linux_kernel"},      # Bluetooth стек
+    "ieee 802.16":  {"vendor": "microsoft",   "product": "windows"},           # WiMAX
+    "ieee 802":     {"vendor": "microsoft",   "product": "windows"},
+    "ppp":          {"vendor": "microsoft",   "product": "windows"},           # PPP в Windows
+    "mac-адрес":    {"vendor": "microsoft",   "product": "windows"},           # ARP/MAC spoofing
+    "arp":          {"vendor": "microsoft",   "product": "windows"},
+
+    # ── Сетевой уровень ──
+    "ip-адрес":     {"vendor": "microsoft",   "product": "windows"},           # TCP/IP стек
+    "ipv4":         {"vendor": "microsoft",   "product": "windows"},
+    "ipsec":        {"vendor": "microsoft",   "product": "windows"},           # Windows IPSec
+    "icmp":         {"vendor": "microsoft",   "product": "windows"},           # Ping of Death и др.
+    "arp-таблица":  {"vendor": "microsoft",   "product": "windows"},
+
+    # ── Транспортный уровень ──
+    "tcp":          {"vendor": "microsoft",   "product": "windows"},           # TCP/IP стек
+    "udp":          {"vendor": "microsoft",   "product": "windows"},
+    "sctp":         {"vendor": "linux",       "product": "linux_kernel"},
+
+    # ── Сеансовый уровень ──
+    "l2tp":         {"vendor": "microsoft",   "product": "windows"},
+    "rpc":          {"vendor": "microsoft",   "product": "windows"},
+    "grpc":         {"vendor": "grpc",        "product": "grpc"},
+    "ms-chapv2":    {"vendor": "microsoft",   "product": "windows"},
+    "httpус":       {"vendor": "microsoft",   "product": "windows"},
+
+    # ── Уровень представления ──
+    "ssl/tls":      {"vendor": "openssl",     "product": "openssl"},           # Heartbleed и др.
+    "ascii":        {"vendor": "microsoft",   "product": "windows"},
+    "ica":          {"vendor": "citrix",      "product": "receiver"},
+    "httpкд":       {"vendor": "apache",      "product": "http_server"},
+    "ebcdic":       {"vendor": "ibm",         "product": "db2"},
+    "xdr":          {"vendor": "grpc",        "product": "grpc"},
+    "lpp":          {"vendor": "microsoft",   "product": "windows"},
+    "ncp":          {"vendor": "novell",      "product": "netware"},
+
+    # ── Прикладной уровень ──
+    "ssh":          {"vendor": "openbsd",     "product": "openssh"},
+    "ssh-клиент":   {"vendor": "openbsd",     "product": "openssh"},
+    "ssh-сервер":   {"vendor": "openbsd",     "product": "openssh"},
+    "ftp":          {"vendor": "microsoft",   "product": "windows"},
+    "ftp-клиент":   {"vendor": "microsoft",   "product": "windows"},
+    "ftp-сервер":   {"vendor": "microsoft",   "product": "windows"},
+    "rdp":          {"vendor": "microsoft",   "product": "remote_desktop_client"},
+    "rdp-клиент":   {"vendor": "microsoft",   "product": "remote_desktop_client"},
+    "rdp-сервер":   {"vendor": "microsoft",   "product": "remote_desktop_client"},
+    "smtp":         {"vendor": "microsoft",   "product": "exchange_server"},
+    "smtp-клиент":  {"vendor": "microsoft",   "product": "windows"},
+    "smtp-сервер":  {"vendor": "microsoft",   "product": "exchange_server"},
+    "imap":         {"vendor": "microsoft",   "product": "exchange_server"},
+    "imap-клиент":  {"vendor": "microsoft",   "product": "windows"},
+    "imap-сервер":  {"vendor": "microsoft",   "product": "exchange_server"},
+    "pop3":         {"vendor": "microsoft",   "product": "exchange_server"},
+    "pop3-клиент":  {"vendor": "microsoft",   "product": "windows"},
+    "pop3-сервер":  {"vendor": "microsoft",   "product": "exchange_server"},
+    "snmp":         {"vendor": "net-snmp",    "product": "net-snmp"},
+    "snmp-клиент":  {"vendor": "net-snmp",    "product": "net-snmp"},
+    "snmp-сервер":  {"vendor": "net-snmp",    "product": "net-snmp"},
+    "sip":          {"vendor": "digium",      "product": "asterisk"},
+    "sip-клиент":   {"vendor": "digium",      "product": "asterisk"},
+    "http":         {"vendor": "apache",      "product": "http_server"},
+    "httpппо":      {"vendor": "apache",      "product": "http_server"},
+    "httpппо-клиент": {"vendor": "microsoft", "product": "internet_explorer"},
+    "httpппо-сервер": {"vendor": "apache",    "product": "http_server"},
+}
+
+
+def get_protocol_cpe(protocol_name: str) -> Optional[Dict[str, str]]:
+    """Возвращает vendor/product для сетевого протокола из PROTOCOL_CVE_MAP.
+
+    Args:
+        protocol_name: Название протокола (например 'SSL/TLS', 'SSH-сервер')
+
+    Returns:
+        {'vendor': ..., 'product': ...} или None если протокол не известен.
+    """
+    return PROTOCOL_CVE_MAP.get(protocol_name.lower())
+
+
 def get_common_component_mapping(component: str) -> Optional[Dict[str, str]]:
     """
     Возвращает предопределённый маппинг для распространённых компонентов.

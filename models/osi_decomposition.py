@@ -130,6 +130,96 @@ class NodeDecomposition:
         self._decompose_hardware()
         self._decompose_kernel()
         self._decompose_user()
+        self._renumber_identifiers()
+
+    def _renumber_identifiers(self):
+        """Иерархическая нумерация компонентов по образцу паспорта ФСТЭК.
+
+        Физический уровень:
+          f1.ТИП.ЭКЗЕМПЛЯР — интерфейсы, сгруппированные по типу порта
+            ethernet → f1.1.1, f1.1.2...  (кросс-ссылка /а14.N на разъём)
+            pon      → f1.2.1, f1.2.2...  (кросс-ссылка /а15.N)
+            wifi     → f1.3.1, f1.3.2...  (кросс-ссылка /а16.N)
+            usb      → f1.4.1, f1.4.2...  (кросс-ссылка /а19.N)
+          f2.N — IEEE-протоколы (IEEE 802.3, 802.11...)
+
+        Аппаратный уровень:
+          аN.m  — основные компоненты (а1–а13), один экземпляр
+          аN.K  — разъёмы/модули (а14–а19), по числу портов
+
+        Остальные уровни — последовательно: z1, l1, t1, d1, r1, q1, i1, u1.
+        """
+        from collections import defaultdict
+
+        # ── Физический уровень ──────────────────────────────────────
+        # Порядок групп портов: ethernet=1, pon=2, wifi=3, usb=4
+        PORT_TYPE_GROUP = {"ethernet": 1, "pon": 2, "wifi": 3, "usb": 4}
+        # Базовый аппаратный идентификатор разъёма для каждого типа порта
+        PT_HW_BASE = {"ethernet": "а14", "pon": "а15", "wifi": "а16", "usb": "а19"}
+
+        def _detect_pt(name: str) -> str:
+            nl = name.lower()
+            if "rj-45" in nl or "ethernet" in nl:
+                return "ethernet"
+            if "wi-fi" in nl or "wifi" in nl:
+                return "wifi"
+            if "pon" in nl or "оптич" in nl:
+                return "pon"
+            if "usb" in nl:
+                return "usb"
+            return "other"
+
+        interfaces = [c for c in self.components.get(OSILevel.PHYSICAL, [])
+                      if c.component_type == "interface"]
+        protocols  = [c for c in self.components.get(OSILevel.PHYSICAL, [])
+                      if c.component_type == "protocol"]
+
+        inst_counters: dict = defaultdict(int)
+        for comp in interfaces:
+            pt = _detect_pt(comp.name)
+            inst_counters[pt] += 1
+            inst = inst_counters[pt]
+            group = PORT_TYPE_GROUP.get(pt, 9)
+            hw_base = PT_HW_BASE.get(pt, "")
+            if hw_base:
+                comp.identifier = f"f1.{group}.{inst}/{hw_base}.{inst}"
+            else:
+                comp.identifier = f"f1.{group}.{inst}"
+
+        for idx, comp in enumerate(protocols, start=1):
+            comp.identifier = f"f2.{idx}"
+
+        # ── Аппаратный уровень ──────────────────────────────────────
+        # Базовые идентификаторы используют латинскую 'a'; разъёмы (≥14)
+        # получают суффикс .K (по числу экземпляров), основные — .m
+        conn_counters: dict = defaultdict(int)
+        for comp in self.components.get(OSILevel.HARDWARE, []):
+            raw = comp.identifier  # "a1", "a14", ...
+            try:
+                num = int(raw.lstrip("aа"))
+                # Переводим латинскую 'a' в кириллическую 'а'
+                cyr = "а" + str(num)
+                if num >= 14:   # разъём/модуль — счётчик экземпляров
+                    conn_counters[raw] += 1
+                    comp.identifier = f"{cyr}.{conn_counters[raw]}"
+                else:           # основной компонент — один экземпляр
+                    comp.identifier = f"{cyr}.m"
+            except (ValueError, IndexError):
+                pass  # нестандартный идент — оставляем как есть
+
+        # ── Остальные уровни — последовательно ──────────────────────
+        for level, prefix in [
+            (OSILevel.DATA_LINK,    "z"),
+            (OSILevel.NETWORK,      "l"),
+            (OSILevel.TRANSPORT,    "t"),
+            (OSILevel.SESSION,      "d"),
+            (OSILevel.PRESENTATION, "r"),
+            (OSILevel.APPLICATION,  "q"),
+            (OSILevel.KERNEL,       "i"),
+            (OSILevel.USER,         "u"),
+        ]:
+            for idx, comp in enumerate(self.components.get(level, []), start=1):
+                comp.identifier = f"{prefix}{idx}"
 
     # ----- Физический уровень -----
 
@@ -234,7 +324,6 @@ class NodeDecomposition:
         for proto_name, ident, desc in [
             ("IP-адрес", "l1", "Логическая адресация"),
             ("IPv4", "l2", "Internet Protocol v4"),
-            ("IPv6", "l3", "Internet Protocol v6"),
             ("IPSec", "l4", "IP Security"),
             ("ICMP", "l5", "Internet Control Message Protocol"),
             ("ARP-таблица", "l6", "Таблица соответствия IP↔MAC"),
@@ -449,30 +538,32 @@ class NodeDecomposition:
                     description=desc
                 ))
 
-            # Разъёмы и модули — по портам узла (а14-а19)
-            port_types_seen = set()
+            # Разъёмы и модули — по одному на каждый порт (для кросс-ссылок)
             for port in self.node.ports:
                 pt = port.get("port_type", "")
-                if pt == "ethernet" and "rj45" not in port_types_seen:
-                    port_types_seen.add("rj45")
+                if pt == "ethernet":
                     self.components[level].append(OSIComponent(
                         name="Разъём RJ-45", level=level,
                         component_type="hardware", identifier="a14",
                         description="Ethernet разъём"
                     ))
-                elif pt == "wifi" and "wifi" not in port_types_seen:
-                    port_types_seen.add("wifi")
+                elif pt == "wifi":
                     self.components[level].append(OSIComponent(
                         name="Модуль Wi-Fi", level=level,
                         component_type="hardware", identifier="a16",
                         description="Беспроводной модуль IEEE 802.11"
                     ))
-                elif pt == "usb" and "usb_port" not in port_types_seen:
-                    port_types_seen.add("usb_port")
+                elif pt == "usb":
                     self.components[level].append(OSIComponent(
                         name="Разъём USB", level=level,
                         component_type="hardware", identifier="a19",
                         description="Разъём USB"
+                    ))
+                elif pt == "pon":
+                    self.components[level].append(OSIComponent(
+                        name="Оптический разъём SC/PC", level=level,
+                        component_type="hardware", identifier="a15",
+                        description="PON оптический разъём"
                     ))
 
     # ----- Ядро ОС -----

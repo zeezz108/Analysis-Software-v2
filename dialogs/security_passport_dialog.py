@@ -19,7 +19,7 @@ from models.node import Node
 from database.cve_db import CVEDatabase
 from database.capec_db import CAPECDatabase
 from utils.cache import DataCache
-from utils.cpe_utils import extract_cpe_components
+from utils.cpe_utils import extract_cpe_components, get_protocol_cpe
 
 
 class SecurityPassportDialog:
@@ -270,6 +270,39 @@ class SecurityPassportDialog:
             print(f"Ошибка поиска CVE для {component_name}: {e}")
             return []
 
+    def _get_cves_for_protocol(self, protocol_name: str) -> List[Dict]:
+        """Ищет CVE для сетевого протокола через PROTOCOL_CVE_MAP.
+
+        Использует кеш узла как и get_all_cves_for_component.
+        Ключ кеша: 'proto::<name>'
+        """
+        cache_key = f"proto::{protocol_name}"
+        cache_root = self.node.properties.setdefault(
+            "security_passport_cache", {"components": {}, "version": 1})
+        comp_cache = cache_root.setdefault("components", {})
+        if not hasattr(self, "_cache_used_keys"):
+            self._cache_used_keys = set()
+        self._cache_used_keys.add(cache_key)
+
+        if cache_key in comp_cache:
+            cached = comp_cache[cache_key]
+            if isinstance(cached, list):
+                return cached
+
+        try:
+            cpe = get_protocol_cpe(protocol_name)
+            if not cpe:
+                comp_cache[cache_key] = []
+                return []
+            vendor = cpe["vendor"]
+            product = cpe["product"]
+            cve_list = self.db.get_cves_exact(vendor, product)
+            comp_cache[cache_key] = cve_list
+            return cve_list
+        except Exception as e:
+            print(f"Ошибка поиска CVE для протокола {protocol_name}: {e}")
+            return []
+
     def _prune_cache(self) -> None:
         """Удаляет из кеша записи, компоненты которых исчезли из конфигурации."""
         cache_root = self.node.properties.get("security_passport_cache")
@@ -361,9 +394,11 @@ class SecurityPassportDialog:
                     spec = comp.description or comp.name
                     search_key = comp.name
 
-                # CVE ищем только для реальных продуктов (hardware/software/peripheral)
+                # CVE ищем для hardware/software/peripheral и протоколов
                 if comp.component_type in ("hardware", "software", "peripheral"):
                     all_cves = self.get_all_cves_for_component(search_key)
+                elif comp.component_type == "protocol":
+                    all_cves = self._get_cves_for_protocol(comp.name)
                 else:
                     all_cves = []
 
@@ -377,19 +412,52 @@ class SecurityPassportDialog:
                 })
 
                 if all_cves:
-                    for cve_data in all_cves:
-                        section_items.append({
-                            "is_header": False,
-                            "cwe": cve_data.get('cwe_id', '--'),
-                            "cve": cve_data.get('cve_id', '--'),
-                            "cvss_v2": cve_data.get('cvss_v2', '--'),
-                            "cvss_v3": cve_data.get('cvss_v3', '--'),
-                            "cvss_v4": cve_data.get('cvss_v4', '--')
-                        })
+                    for cve_data in all_cves[:10]:
+                        raw_cwe = cve_data.get('cwe_id', '--')
+                        capecs = []
+                        if raw_cwe and raw_cwe != '--':
+                            try:
+                                cwe_num = int(raw_cwe.replace("CWE-", "").strip())
+                                capecs = (self.capec_db.get_capecs_by_cwe_ids({cwe_num}) if self.capec_db else [])[:10]
+                            except (ValueError, AttributeError):
+                                pass
+
+                        if capecs:
+                            # Первая строка — с CWE/CVE/CVSS + первый CAPEC
+                            section_items.append({
+                                "is_header": False,
+                                "cwe": raw_cwe,
+                                "cve": cve_data.get('cve_id', '--'),
+                                "cvss_v3": cve_data.get('cvss_v3', '--'),
+                                "capec": f"CAPEC-{capecs[0]['capec_id']}",
+                                "stage": self.capec_db.get_bdu_stage(capecs[0]['capec_id']),
+                                "is_capec_continuation": False,
+                            })
+                            # Остальные CAPEC — отдельные строки без повтора CWE/CVE/CVSS
+                            for cap in capecs[1:]:
+                                section_items.append({
+                                    "is_header": False,
+                                    "cwe": "",
+                                    "cve": "",
+                                    "cvss_v3": "",
+                                    "capec": f"CAPEC-{cap['capec_id']}",
+                                    "stage": self.capec_db.get_bdu_stage(cap['capec_id']),
+                                    "is_capec_continuation": True,
+                                })
+                        else:
+                            section_items.append({
+                                "is_header": False,
+                                "cwe": raw_cwe,
+                                "cve": cve_data.get('cve_id', '--'),
+                                "cvss_v3": cve_data.get('cvss_v3', '--'),
+                                "capec": "--", "stage": "--",
+                                "is_capec_continuation": False,
+                            })
                 else:
                     section_items.append({
                         "is_header": False, "cwe": "--", "cve": "--",
-                        "cvss_v2": "--", "cvss_v3": "--", "cvss_v4": "--"
+                        "cvss_v3": "--", "capec": "--", "stage": "--",
+                        "is_capec_continuation": False,
                     })
 
             if section_items:
@@ -543,12 +611,12 @@ class SecurityPassportDialog:
         style.theme_use("clam")
 
         style.configure("Treeview", background="white", foreground="black",
-                        fieldbackground="white", font=('Segoe UI', 10), rowheight=sp(28))
+                        fieldbackground="white", font=('Segoe UI', 11), rowheight=sp(32))
         style.configure("Treeview.Heading", background="#d9d9d9", foreground="black",
-                        font=('Segoe UI', 10, 'bold'), height=30)
+                        font=('Segoe UI', 11, 'bold'), height=36)
 
         columns = ("Идентификатор", "Наименование объекта", "Спецификация",
-                   "CWE", "CVE", "CVSS V2", "CVSS V3", "CVSS V4")
+                   "CWE", "CVE", "CVSS V3.1", "CAPEC", "Этап ККА")
 
         self.tree = ttk.Treeview(parent, columns=columns, show="headings", height=25, selectmode="browse")
 
@@ -560,9 +628,9 @@ class SecurityPassportDialog:
         self.tree.column("Спецификация", width=280, anchor='w')
         self.tree.column("CWE", width=90, anchor='center')
         self.tree.column("CVE", width=150, anchor='center')
-        self.tree.column("CVSS V2", width=80, anchor='center')
-        self.tree.column("CVSS V3", width=80, anchor='center')
-        self.tree.column("CVSS V4", width=80, anchor='center')
+        self.tree.column("CVSS V3.1", width=90, anchor='center')
+        self.tree.column("CAPEC", width=180, anchor='w')
+        self.tree.column("Этап ККА", width=200, anchor='center')
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(parent, orient="horizontal", command=self.tree.xview)
@@ -575,8 +643,9 @@ class SecurityPassportDialog:
         parent.grid_rowconfigure(0, weight=1)
         parent.grid_columnconfigure(0, weight=1)
 
-        self.tree.tag_configure('section_header', background='#e0e0e0', font=('Segoe UI', 10, 'bold'))
-        self.tree.tag_configure('component_header', background='#f5f5f5', font=('Segoe UI', 10, 'bold'))
+        self.tree.tag_configure('section_header', background='#e0e0e0', font=('Segoe UI', 11, 'bold'))
+        self.tree.tag_configure('component_header', background='#f5f5f5', font=('Segoe UI', 11, 'bold'))
+        self.tree.tag_configure('capec_continuation', background='#fafafa', foreground='#555555', font=('Segoe UI', 11))
 
     def populate_table(self, passport_data: List[Dict], total_vulnerabilities: int):
         """Заполняет таблицу данными."""
@@ -603,14 +672,15 @@ class SecurityPassportDialog:
                         "", "", "", ""
                     ), tags=('component_header',))
                 else:
+                    tags = ('capec_continuation',) if item.get('is_capec_continuation') else ()
                     self.tree.insert("", tk.END, values=(
                         "", "", "",
-                        item.get('cwe', '--'),
-                        item.get('cve', '--'),
-                        item.get('cvss_v2', '--'),
-                        item.get('cvss_v3', '--'),
-                        item.get('cvss_v4', '--')
-                    ))
+                        item.get('cwe', ''),
+                        item.get('cve', ''),
+                        item.get('cvss_v3', ''),
+                        item.get('capec', '--'),
+                        item.get('stage', '--')
+                    ), tags=tags)
 
         if total_vulnerabilities > 0:
             self.status_label.configure(text=f"⚠️ Найдено уязвимостей: {total_vulnerabilities}", text_color="red")
@@ -624,9 +694,9 @@ class SecurityPassportDialog:
         style = ttk.Style()
 
         style.configure("Capec.Treeview", background="white", foreground="black",
-                        fieldbackground="white", font=('Segoe UI', 10), rowheight=sp(28))
+                        fieldbackground="white", font=('Segoe UI', 11), rowheight=sp(32))
         style.configure("Capec.Treeview.Heading", background="#d9d9d9", foreground="black",
-                        font=('Segoe UI', 10, 'bold'), height=30)
+                        font=('Segoe UI', 11, 'bold'), height=36)
 
         columns = ("CAPEC ID", "Название атаки", "Уровень", "Серьёзность",
                    "Вероятность", "Связанные CWE", "Описание")
@@ -839,7 +909,7 @@ class SecurityPassportDialog:
         # Таблица
         headers = [
             "Идентификатор", "Наименование объекта", "Спецификация",
-            "CWE", "CVE", "CVSS V2", "CVSS V3", "CVSS V4"
+            "CWE", "CVE", "CVSS V3.1", "CAPEC", "Этап ККА"
         ]
         table_data = [[Paragraph(h, ParagraphStyle(
             "HeadRu", fontName=font_bold, fontSize=9, textColor=colors.white, alignment=1
@@ -873,14 +943,14 @@ class SecurityPassportDialog:
 
         # Ширина колонок — подбираем под альбомный A4 (≈ 277 мм полезной ширины)
         col_widths = [
-            28 * mm,  # Идентификатор
-            50 * mm,  # Наименование
-            65 * mm,  # Спецификация
-            22 * mm,  # CWE
-            38 * mm,  # CVE
-            18 * mm,  # V2
-            18 * mm,  # V3
-            18 * mm,  # V4
+            22 * mm,  # Идентификатор
+            38 * mm,  # Наименование
+            48 * mm,  # Спецификация
+            20 * mm,  # CWE
+            40 * mm,  # CVE
+            18 * mm,  # CVSS V3.1
+            45 * mm,  # CAPEC
+            46 * mm,  # Тактика ФСТЭК
         ]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
