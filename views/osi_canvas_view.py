@@ -24,6 +24,11 @@ class OSIDecompositionView:
         self.board = board
         self.topology = TopologyDecomposition(board)
 
+        # Маркеры маршрутов распространения УБИ: (узел, идентификатор) → ['χ2.4', 'χ3.1']
+        self._chi_markers = {}
+        self._chi_routes = []      # человекочитаемое описание маршрутов
+        self._show_chi = False
+
         # Все узлы топологии (этап 2 — все узлы)
         self.target_node = None  # для совместимости с header
 
@@ -428,6 +433,95 @@ class OSIDecompositionView:
         self._zoom = new_zoom
         self._draw()
 
+    # ------------------------------------------------------------------
+    # Маршруты распространения УБИ (χ)
+    # ------------------------------------------------------------------
+
+    def _compute_chi(self):
+        """Считает маршруты χ волновым алгоритмом по всей топологии.
+
+        На эталонной схеме маршрут подписан на каждом компоненте, через
+        который проходит: «TCP (χ2.4)(χ3.1)». Номер после точки — номер шага,
+        то есть номер волнового фронта.
+
+        Цели выбираются по одной на узел, в порядке удаления от точки входа:
+        так первый маршрут получается коротким, а последний уходит через всю
+        сеть — как χ1 и χ3 на схеме. Если уязвимости уже найдены кнопкой
+        «Найти уязвимости», предпочтение отдаётся уязвимым компонентам.
+        """
+        from collections import defaultdict
+
+        from models.topology_graph import build_topology_graph
+        from models.wave import propagate, restore_route
+
+        self._chi_markers = {}
+        self._chi_routes = []
+
+        graph = build_topology_graph(self.board)
+        if not graph.entry_points:
+            return
+
+        entry = graph.entry_points[0]
+        field = propagate(graph.adjacency, [entry])
+
+        # Какие компоненты уязвимы — по результатам поиска CVE, если он был
+        vulnerable = set()
+        for node_id, decomposition in self.topology.decompositions.items():
+            for comps in decomposition.components.values():
+                for comp in comps:
+                    if comp.has_vulnerability and comp.identifier:
+                        vulnerable.add((node_id, comp.identifier))
+
+        # По одной цели на узел: самая дальняя достижимая вершина узла
+        per_node = {}
+        for vid, depth in field.distance.items():
+            vertex = graph.vertices[vid]
+            if vertex.is_entry_point:
+                continue
+            key = (vertex.node_id, vertex.identifier)
+            score = (1 if key in vulnerable else 0, depth)
+            best = per_node.get(vertex.node_id)
+            if best is None or score > best[0]:
+                per_node[vertex.node_id] = (score, vid)
+
+        targets = sorted(per_node.values(), key=lambda item: field.distance[item[1]])
+        markers = defaultdict(list)
+
+        for number, (_score, target) in enumerate(targets, start=1):
+            route = restore_route(field, target)
+            if len(route) < 2:
+                continue
+            for step, vid in enumerate(route, start=1):
+                vertex = graph.vertices[vid]
+                markers[(vertex.node_id, vertex.identifier)].append(
+                    f"χ{number}.{step}")
+            last = graph.vertices[target]
+            self._chi_routes.append(
+                f"χ{number}: {len(route)} шагов → {last.node_name} · "
+                f"{self._display_name(last.name)}")
+
+        self._chi_markers = dict(markers)
+
+    def _on_toggle_chi(self):
+        """Включает и выключает показ маршрутов χ на схеме."""
+        self._show_chi = not self._show_chi
+        if self._show_chi:
+            try:
+                self._compute_chi()
+            except Exception as exc:      # noqa: BLE001 — сообщаем пользователю
+                from tkinter import messagebox
+                messagebox.showerror(
+                    "Маршруты χ",
+                    "Не удалось построить маршруты: " + str(exc))
+                self._show_chi = False
+                return
+            self._chi_btn.configure(text=f"Маршруты χ: {len(self._chi_routes)}")
+        else:
+            self._chi_markers = {}
+            self._chi_routes = []
+            self._chi_btn.configure(text="Маршруты χ")
+        self._draw()
+
     def _on_find_vulnerabilities(self):
         """Запускает поиск CVE для всех компонентов в фоновом потоке."""
         import threading
@@ -513,6 +607,14 @@ class OSIDecompositionView:
             text_color="#FFFFFF"
         )
         self._vuln_btn.pack(side=tk.RIGHT, padx=(0, 10))
+
+        self._chi_btn = ctk.CTkButton(
+            header, text="Маршруты χ", command=self._on_toggle_chi,
+            width=130, height=34, corner_radius=8,
+            fg_color="#B45309", hover_color="#D97706",
+            text_color="#FFFFFF"
+        )
+        self._chi_btn.pack(side=tk.RIGHT, padx=(0, 10))
 
         # Canvas
         canvas_frame = ctk.CTkFrame(self.window, fg_color=color("card_bg"),
@@ -620,6 +722,9 @@ class OSIDecompositionView:
     @staticmethod
     def _display_name(name):
         """Сокращает длинное имя компонента для отображения на схеме."""
+        # CPE-суффикс «||vendor|product|version» нужен только для поиска
+        # уязвимостей, на схеме он лишний
+        name = name.split("||")[0].strip().rstrip("- ").strip()
         # Ядро ОС: убираем «Подсистема»
         _KERN_SHORT = {
             "Подсистема драйверов устройств": "Драйверы устройств",
@@ -840,10 +945,14 @@ class OSIDecompositionView:
                         col_x + col_width - 4, cy + comp_h,
                         fill=c_fill, outline=c_outline, width=c_width
                     )
-                    # Текст
-                    text = comp.name
+                    # Текст. Маркеры маршрутов дописываются к названию так же,
+                    # как на эталонной схеме: «TCP (χ2.4)(χ3.1)»
+                    text = self._display_name(comp.name)
                     if len(text) > 18:
                         text = text[:16] + "…"
+                    marks = self._chi_markers.get((node.id, comp.identifier))
+                    if marks:
+                        text += chr(10) + "".join(f"({m})" for m in marks[:3])
                     self.canvas.create_text(
                         col_x + col_width / 2, cy + comp_h / 2,
                         text=text,
