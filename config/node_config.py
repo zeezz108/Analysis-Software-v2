@@ -16,6 +16,7 @@
 _PROCESSORS_DESKTOP = {
     "title": "Процессоры", "method": "get_processors", "var_name": "processor",
     "cpe_filter": {"part": "h", "vendors": ["intel", "amd"],
+                   "ru_categories": ["Процессоры"],
                    "families": {
                        "intel": [
                            ("Core i9", "core_i9"),
@@ -165,13 +166,15 @@ _STORAGE_CPE_FILTER = {
 
 _STORAGE_TAB = {
     "title": "Накопители данных", "method": "get_storage_devices", "var_name": "hdd",
-    "cpe_filter": _STORAGE_CPE_FILTER,
+    "cpe_filter": dict(_STORAGE_CPE_FILTER,
+                       ru_categories=["Накопители", "Системы хранения"]),
     "prefix": "HDD/SSD"}
 
 # --- Сетевые адаптеры ---
 _NETWORK_ADAPTER_TAB = {
     "title": "Сетевые адаптеры", "method": "get_network_cards", "var_name": "network_adapter",
     "cpe_filter": {"part": "h", "vendors": ["intel", "broadcom", "realtek", "qualcomm"],
+                   "ru_categories": ["Сетевое оборудование", "Комплектующие"],
                    "families": {
                        "intel": [
                            ("Ethernet", "ethernet"),
@@ -199,7 +202,12 @@ _CHIPSET_TAB = {
 # --- Клиентские ОС ---
 _CLIENT_OS_TAB = {
     "title": "Операционные системы", "method": "get_client_operating_systems", "var_name": "os",
-    "cpe_filter": {"part": "o", "vendors": ["microsoft", "canonical", "redhat", "fedoraproject",
+    "cpe_filter": {"part": "o", "ru_categories": ["ОС Linux"],
+                   # В реестре категория засорена прикладным ПО, поэтому
+                   # дополнительно отбираем по наименованию
+                   "ru_title_like": ["ОС ", "Операционная", "операционная",
+                                     "Linux", "OS"],
+                   "vendors": ["microsoft", "canonical", "redhat", "fedoraproject",
                                              "debian", "apple", "opensuse", "suse", "linux"],
                    "families": {
                        "microsoft": [
@@ -242,6 +250,7 @@ _SECURITY_SOFTWARE_TAB = {
     "title": "Средства защиты информации", "method": "get_application_software",
     "var_name": "security_software",
     "cpe_filter": {"part": "a",
+                   "ru_categories": ["СЗИ / Антивирусы"],
                    "vendors": ["kaspersky", "drweb", "symantec", "mcafee", "trendmicro",
                                "eset", "avast", "avg", "bitdefender", "f-secure",
                                "comodo", "avira", "panda"],
@@ -255,6 +264,8 @@ _SECURITY_SOFTWARE_TAB = {
 _APP_SOFTWARE_TAB = {
     "title": "Прикладное ПО", "method": "get_application_software", "var_name": "app_software",
     "cpe_filter": {"part": "a",
+                   "ru_categories": ["Прикладное ПО", "Корпоративное ПО",
+                                     "Отраслевое ПО"],
                    "vendors": [
                        # Офисное/продуктивность
                        "microsoft", "libreoffice", "adobe",
@@ -632,7 +643,8 @@ NODE_CONFIG = {
             _PROCESSORS_SERVER,
             {"title": "Накопители данных", "method": "get_storage_devices",
              "var_name": "server_storage",
-             "cpe_filter": _STORAGE_CPE_FILTER,
+             "cpe_filter": dict(_STORAGE_CPE_FILTER,
+                                ru_categories=["Накопители", "Системы хранения"]),
              "prefix": "HDD/SSD"},
             {"title": "Сетевые адаптеры", "method": "get_network_cards",
              "var_name": "server_nic",
@@ -749,7 +761,8 @@ NODE_CONFIG = {
              "prefix": "ОЗУ"},
             {"title": "Диски/Хранилище", "method": "get_server_storage",
              "var_name": "server_storage", "multiple": True,
-             "cpe_filter": _STORAGE_CPE_FILTER,
+             "cpe_filter": dict(_STORAGE_CPE_FILTER,
+                                ru_categories=["Накопители", "Системы хранения"]),
              "prefix": "HDD/SSD"},
             {"title": "Сетевые карты", "method": "get_network_cards",
              "var_name": "server_nics", "multiple": True,

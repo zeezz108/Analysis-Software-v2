@@ -12,6 +12,15 @@ from typing import List, Dict, Optional, Tuple
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
+def _rulower(value):
+    """Приведение к нижнему регистру с поддержкой кириллицы.
+
+    Встроенный LOWER() в SQLite работает только с латиницей, поэтому
+    сравнение русских названий без этой замены всегда даёт промах.
+    """
+    return value.lower() if isinstance(value, str) else value
+
+
 class ComponentCatalog:
     """Синглтон для работы с каталогом компонентов."""
 
@@ -38,6 +47,11 @@ class ComponentCatalog:
         print(f"[CATALOG] Подключение к: {db_path}")
         self._connection = sqlite3.connect(db_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
+
+        # Встроенный LOWER() в SQLite умеет только латиницу: LOWER('Эльбрус')
+        # возвращает строку без изменений, и поиск по русским названиям
+        # не находит ничего. Подменяем на функцию Python.
+        self._connection.create_function('rulower', 1, _rulower)
 
     @property
     def available(self) -> bool:
@@ -331,18 +345,18 @@ class ComponentCatalog:
 
         clean_title = (title or "").strip()
         if clean_title:
-            found = _fetch("LOWER(TRIM(title)) = LOWER(?)", [clean_title])
+            found = _fetch("rulower(TRIM(title)) = ?", [clean_title.lower()])
             if found:
                 return found
 
         v = (vendor or "").strip().lower()
         p = (product or "").strip().lower()
         if v and p:
-            found = _fetch("LOWER(vendor) = ? AND LOWER(product) = ?", [v, p])
+            found = _fetch("rulower(vendor) = ? AND rulower(product) = ?", [v, p])
             if found:
                 return found
         if p:
-            found = _fetch("LOWER(product) = ?", [p])
+            found = _fetch("rulower(product) = ?", [p])
             if found:
                 return found
 

@@ -19,6 +19,8 @@ from typing import Dict, List, Optional, Any, Tuple
 from models.zone import Zone
 from models.node import Node, VirtualMachine
 from database.cve_db import CVEDatabase
+from database.component_source import (ComponentSource, is_russian_choice,
+                                        strip_mark)
 from utils.cache import DataCache
 from utils.validators import validate_ip, validate_mac, validate_mask, validate_vlan_id
 from utils.generators import uid, generate_test_ip, generate_test_mac, generate_test_mask
@@ -212,7 +214,9 @@ class NodeCreationDialog:
 
         # Подключаемся к БД
         try:
-            self.db = CVEDatabase()
+            # Источник компонентов: NVD плюс реестры отечественного ПО.
+            # Ведёт себя как CVEDatabase, всё непереопределённое делегирует ей
+            self.db = ComponentSource()
         except FileNotFoundError as e:
             messagebox.showerror("Ошибка", str(e))
             raise
@@ -1267,6 +1271,8 @@ class NodeCreationDialog:
         families_map = cpe_filter.get("families")
         p_like = cpe_filter.get("product_like")
         p_not_like = cpe_filter.get("product_not_like")
+        ru_cats = cpe_filter.get("ru_categories")
+        ru_titles = cpe_filter.get("ru_title_like")
         has_families = bool(families_map)
         is_multiple = config.get("multiple", False)
 
@@ -1299,7 +1305,9 @@ class NodeCreationDialog:
                         p_not_like = new_filter.get("product_not_like")
                         has_families = bool(families_map)
                         # Reload vendors
-                        new_vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
+                        new_vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter,
+                                                          ru_categories=ru_cats,
+                                      ru_title_like=ru_titles)
                         vendor_cb.configure(values=new_vendors)
                         _clear_selection()
                         break
@@ -1473,7 +1481,16 @@ class NodeCreationDialog:
         def _update_display():
             v, p, ver = cpe_state["vendor"], cpe_state["product"], cpe_state["version"]
             if v and p:
-                display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
+                # Отечественные записи помечены звёздочкой в списке выбора.
+                # В свойствах узла хранится чистое имя, иначе пометка попала бы
+                # в CPE-суффикс и сломала поиск уязвимостей
+                russian = is_russian_choice(v)
+                v = strip_mark(v)
+                if russian:
+                    # Наименование из реестра уже читаемое, «title case» его портит
+                    display = p if p.lower().startswith(v.lower()) else f"{v} {p}"
+                else:
+                    display = f"{v.replace('_', ' ').title()} {p.replace('_', ' ').title()}"
                 if ver:
                     display += f" {ver}"
                 # CPE-суффикс встраивается прямо в строку: ||vendor|product|version
@@ -1484,7 +1501,8 @@ class NodeCreationDialog:
             self._update_config_summary()
 
         # --- Загрузка вендоров ---
-        vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter)
+        vendors = self.db.get_vendors(part=part, vendors_filter=vendors_filter,
+                                      ru_categories=ru_cats)
         vendor_cb.configure(values=vendors)
 
         def _on_vendor(*_):
@@ -1508,7 +1526,9 @@ class NodeCreationDialog:
                 _show_step(family_f)
             else:
                 products = self.db.get_products(vendor, part=part,
-                                                 product_like=p_like, product_not_like=p_not_like)
+                                                 product_like=p_like, product_not_like=p_not_like,
+                                                 ru_categories=ru_cats,
+                                                 ru_title_like=ru_titles)
                 product_cb.configure(values=products)
                 product_cnt.configure(text=f"{len(products)} продуктов")
                 _show_step(product_f)

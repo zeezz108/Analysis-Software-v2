@@ -19,6 +19,8 @@ from models.node import Node
 from models.route import Route
 from models.firewall import FirewallManager
 from database.cve_db import CVEDatabase
+from database.component_source import (ComponentSource, is_russian_choice,
+                                        strip_mark)
 from utils.cache import DataCache
 from utils.validators import validate_ip, validate_mac, validate_mask, validate_vlan_id
 from utils.theme import center_window
@@ -71,7 +73,9 @@ class PropertiesDialog:
             self.current_ports = [port.copy() for port in self.element.ports]
 
             try:
-                self.db = CVEDatabase()
+                # Источник компонентов: NVD плюс реестры отечественного ПО.
+                # Ведёт себя как CVEDatabase, всё непереопределённое делегирует ей
+                self.db = ComponentSource()
                 if self.cache.is_loaded():
                     self.load_from_cache()
                     self.create_widgets()
