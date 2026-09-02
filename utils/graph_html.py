@@ -48,16 +48,18 @@ LEVEL_COLORS = {
 ROUTE_COLORS = ["#D97706", "#2563EB", "#7C3AED", "#BE123C",
                 "#059669", "#DB2777"]
 
-# Геометрия SVG
-COL_W = 128
-V_STEP = 62
-V_RAD = 15
+# Геометрия SVG. Все размеры удвоены относительно первой версии: на схеме
+# из двух сотен вершин подписи при вписывании в окно оказывались нечитаемо
+# мелкими. Вместе с размерами удвоены и шрифты в стилях ниже.
+COL_W = 256
+V_STEP = 124
+V_RAD = 30
 MAX_PER_COL = 6
-ROW_GAP = 78
-BLOCK_PAD = 30
-BLOCK_GAP_X = 70
-BLOCK_GAP_Y = 92
-MARGIN = 40
+ROW_GAP = 156
+BLOCK_PAD = 60
+BLOCK_GAP_X = 140
+BLOCK_GAP_Y = 184
+MARGIN = 80
 TARGET_RATIO = 1.5
 
 
@@ -107,13 +109,13 @@ def _layout_block(grouped: Dict[str, List[str]]
         x = (block_w - width) // 2
         for lvl, sub_cols, per_col in plan:
             column = grouped[lvl]
-            headers.append((lvl, x + (sub_cols * COL_W) // 2, y - 22))
+            headers.append((lvl, x + (sub_cols * COL_W) // 2, y - 44))
             for index, vid in enumerate(column):
                 sub, within = divmod(index, per_col)
                 count = min(per_col, len(column) - sub * per_col)
                 offset = ((per_col - count) * V_STEP) // 2
                 positions[vid] = (x + sub * COL_W + COL_W // 2,
-                                  y + offset + within * V_STEP + V_RAD + 6)
+                                  y + offset + within * V_STEP + V_RAD + 12)
             x += sub_cols * COL_W
         y += height + ROW_GAP
 
@@ -147,13 +149,13 @@ def _layout(graph, board):
     for index, (node_id, name, positions, width, height, headers) in enumerate(prepared):
         col, row = index % best_cols, index // best_cols
         ox = MARGIN + col * cell_w + BLOCK_PAD
-        oy = MARGIN + row * cell_h + BLOCK_PAD + 26
+        oy = MARGIN + row * cell_h + BLOCK_PAD + 52
         for vid, (x, y) in positions.items():
             pos[vid] = (ox + x, oy + y)
         blocks.append({
             "id": node_id, "name": name,
-            "x": ox - BLOCK_PAD, "y": oy - BLOCK_PAD - 22,
-            "w": width + BLOCK_PAD * 2, "h": height + BLOCK_PAD * 2 + 22,
+            "x": ox - BLOCK_PAD, "y": oy - BLOCK_PAD - 44,
+            "w": width + BLOCK_PAD * 2, "h": height + BLOCK_PAD * 2 + 44,
             "headers": [(lvl, ox + hx, oy + hy) for lvl, hx, hy in headers],
         })
 
@@ -211,9 +213,9 @@ def build_graph_html(graph, board,
     for block in blocks:
         parts.append(
             f'<rect class="block" x="{block["x"]}" y="{block["y"]}" '
-            f'width="{block["w"]}" height="{block["h"]}" rx="14"/>'
-            f'<text class="block-title" x="{block["x"] + 14}" '
-            f'y="{block["y"] + 22}">{_esc(block["name"])}</text>')
+            f'width="{block["w"]}" height="{block["h"]}" rx="24"/>'
+            f'<text class="block-title" x="{block["x"] + 26}" '
+            f'y="{block["y"] + 40}">{_esc(block["name"])}</text>')
         for lvl, hx, hy in block["headers"]:
             parts.append(
                 f'<text class="lvl" x="{hx}" y="{hy}" '
@@ -240,7 +242,7 @@ def build_graph_html(graph, board,
             route = route_of_edge.get((source, target))
             if route is not None:
                 colour = ROUTE_COLORS[route % len(ROUTE_COLORS)]
-                edges_route.append(f'{line} stroke="{colour}" stroke-width="4"/>')
+                edges_route.append(f'{line} stroke="{colour}" stroke-width="8"/>')
             elif graph.vertices[target].node_id != node_a:
                 edges_cross.append(f'{line} class="cross"/>')
             else:
@@ -261,7 +263,7 @@ def build_graph_html(graph, board,
                         for n in route_of_vertex.get(vid, []))
         classes = "v" + (" on-route" if vid in route_of_vertex else "")
         clean = _clean(vertex.name)
-        label = clean if len(clean) <= 18 else clean[:17] + "…"
+        label = clean if len(clean) <= 26 else clean[:25] + "…"
 
         nodes_svg.append(
             f'<g class="{classes}" data-id="{_esc(vid)}" '
@@ -273,10 +275,10 @@ def build_graph_html(graph, board,
             f'data-type="{_esc(vertex.component_type)}" '
             f'transform="translate({x},{y})">'
             f'<circle r="{V_RAD}" fill="#FFFFFF" stroke="{colour}" '
-            f'stroke-width="2.4"{" stroke-dasharray=\"5 3\"" if transit_only else ""}/>'
-            f'<text class="ident" y="4">{_esc(vertex.identifier[:8])}</text>'
-            f'<text class="name" y="{V_RAD + 15}">{_esc(label)}</text>'
-            + (f'<text class="chi" y="{V_RAD + 27}">{_esc(marks)}</text>' if marks else "")
+            f'stroke-width="4.6"{" stroke-dasharray=\"5 3\"" if transit_only else ""}/>'
+            f'<text class="ident" y="8">{_esc(vertex.identifier[:8])}</text>'
+            f'<text class="name" y="{V_RAD + 30}">{_esc(label)}</text>'
+            + (f'<text class="chi" y="{V_RAD + 54}">{_esc(marks)}</text>' if marks else "")
             + f'<title>{_esc(vertex.node_name)} · {_esc(clean)}\n'
               f'{_esc(vertex.identifier)} · {_esc(vertex.role)}</title>'
             f'</g>')
@@ -347,19 +349,19 @@ aside dd {{ margin:2px 0 0; font-size:13px; word-break:break-word; }}
 .dot {{ display:inline-block; width:9px; height:9px; border-radius:50%;
   margin-right:7px; vertical-align:middle; }}
 svg {{ display:block; }}
-.block {{ fill:#FCFDFE; stroke:#C3CBD4; stroke-width:1.4;
-  stroke-dasharray:7 5; }}
-.block-title {{ font-size:14px; font-weight:600; fill:var(--ink); }}
-.lvl {{ font-size:11px; font-weight:700; text-anchor:middle;
+.block {{ fill:#FCFDFE; stroke:#C3CBD4; stroke-width:2.8;
+  stroke-dasharray:14 10; }}
+.block-title {{ font-size:28px; font-weight:600; fill:var(--ink); }}
+.lvl {{ font-size:22px; font-weight:700; text-anchor:middle;
   letter-spacing:.02em; }}
-.intra {{ stroke:var(--faint); stroke-width:0.9; }}
-.cross {{ stroke:#1D4ED8; stroke-width:2.6; }}
-.ident {{ font-size:9.5px; font-weight:600; text-anchor:middle; fill:var(--ink); }}
-.name {{ font-size:10.5px; text-anchor:middle; fill:var(--muted); }}
-.chi {{ font-size:10px; font-weight:700; text-anchor:middle; fill:#B45309; }}
+.intra {{ stroke:var(--faint); stroke-width:1.8; }}
+.cross {{ stroke:#1D4ED8; stroke-width:5.2; }}
+.ident {{ font-size:19px; font-weight:600; text-anchor:middle; fill:var(--ink); }}
+.name {{ font-size:21px; text-anchor:middle; fill:var(--muted); }}
+.chi {{ font-size:20px; font-weight:700; text-anchor:middle; fill:#B45309; }}
 .v {{ cursor:pointer; }}
-.v:hover circle {{ stroke-width:4; }}
-.v.sel circle {{ stroke:#DC2626 !important; stroke-width:4.5; }}
+.v:hover circle {{ stroke-width:8; }}
+.v.sel circle {{ stroke:#DC2626 !important; stroke-width:9; }}
 .v.dim {{ opacity:.16; }}
 line.dim {{ opacity:.05; }}
 body.hide-intra #intra {{ display:none; }}
@@ -391,11 +393,18 @@ const W={width}, H={height};
 let s=1, tx=0, ty=0;
 function apply(){{ world.setAttribute('transform',
   'translate('+tx+','+ty+') scale('+s+')'); }}
-function fit(){{ const r=stage.getBoundingClientRect();
-  s=Math.min(r.width/W, r.height/H)*0.98;
-  tx=(r.width-W*s)/2; ty=(r.height-H*s)/2;
+function view(scale, centred){{ const r=stage.getBoundingClientRect();
+  s=scale; tx=centred?(r.width-W*s)/2:60; ty=centred?(r.height-H*s)/2:60;
   svg.setAttribute('viewBox','0 0 '+r.width+' '+r.height); apply(); }}
-window.addEventListener('resize', fit);
+function fitScale(){{ const r=stage.getBoundingClientRect();
+  return Math.min(r.width/W, r.height/H)*0.98; }}
+function fit(){{ view(fitScale(), true); }}
+/* Стартовый вид не сжимает схему целиком: на двух сотнях вершин это даёт
+   такой масштаб, что подписи не прочитать. Открываем не мельче 60 % и
+   даём осмотреть панорамой, а кнопка «Вписать» показывает всё сразу. */
+function start(){{ view(Math.max(fitScale(), 0.6), fitScale() >= 0.6); }}
+window.addEventListener('resize', ()=>{{ const r=stage.getBoundingClientRect();
+  svg.setAttribute('viewBox','0 0 '+r.width+' '+r.height); apply(); }});
 document.getElementById('fit').onclick=fit;
 
 stage.addEventListener('wheel', e=>{{ e.preventDefault();
@@ -428,7 +437,7 @@ verts.forEach(v=>v.addEventListener('click', ev=>{{ ev.stopPropagation();
     ['Тип',d.type]];
   info.innerHTML=rows.map(r=>'<dt>'+r[0]+'</dt><dd>'+r[1]+'</dd>').join('');
 }}));
-fit();
+start();
 </script>
 """
 
