@@ -517,6 +517,9 @@ class CanvasView:
         self.btn_osi_decomposition = self._make_sidebar_button(
             sec_analysis, "🔬  Схема ЭМВОС", self.show_osi_decomposition, variant="primary"
         )
+        self.btn_kka_routes = self._make_sidebar_button(
+            sec_analysis, "🌊  Маршруты УБИ", self.show_kka_routes, variant="primary"
+        )
 
         sec_settings = self._make_collapsible_section(control_frame, "НАСТРОЙКИ", expanded=False)
         self.btn_grid = self._make_sidebar_button(
@@ -817,6 +820,11 @@ class CanvasView:
         """Открывает окно схемы разложения топологии по ЭМВОС."""
         from views.osi_canvas_view import show_osi_decomposition
         show_osi_decomposition(self.root, self.board)
+
+    def show_kka_routes(self):
+        """Открывает окно маршрутов распространения УБИ (вектор ККА)."""
+        from views.kka_view import show_kka_routes
+        show_kka_routes(self.root, self.board)
 
     def show_connectivity_report(self):
         """Показывает отчёт о сетевой связности в табличном виде."""

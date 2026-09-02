@@ -10,7 +10,12 @@
       "WebFetch(*)",
       "WebSearch(*)",
       "Skill(*)",
-      "Agent(*)"
+      "Agent(*)",
+      "Bash(mkdir -p ~/.claude/skills/frontend-design)",
+      "Bash(\"/c/Program Files/GitHub CLI/gh.exe\" api repos/anthropics/claude-code/contents/plugins/frontend-design/skills/frontend-design/SKILL.md --jq '.content')",
+      "Bash(python -c \"import sys,base64; sys.stdout.buffer.write\\(base64.b64decode\\(sys.stdin.read\\(\\)\\)\\)\")",
+      "PowerShell(& \"C:\\\\Python Projects\\\\Analysis-Software-v2\\\\.venv\\\\Scripts\\\\python.exe\" -m pip install pypdf --quiet)",
+      "PowerShell(git pull *)"
     ]
   }
 }
