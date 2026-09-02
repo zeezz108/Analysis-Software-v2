@@ -559,8 +559,12 @@ class CVEDatabase:
     # ПОИСК CVE — через JOIN с нормализованными таблицами
     # =================================================================
 
-    # Максимум записей в кеше выборок по CPE (одна выборка ~ несколько МБ)
-    _CPE_CACHE_LIMIT = 24
+    # Бюджет кеша выборок по CPE — в строках, а не в числе выборок.
+    # Выборки очень разные: у openssh 118 записей, у microsoft/windows 17 611.
+    # Одна строка вместе с описанием занимает около 1 КБ, поэтому 60 000 строк
+    # это примерно 60 МБ. Ограничение по числу выборок при том же лимите
+    # давало бы до 190 МБ, если бы подряд попались крупные продукты.
+    _CPE_CACHE_ROWS = 60_000
 
     def get_cves_for_component(self, vendor: str,
                                 product: str = None,
@@ -637,9 +641,14 @@ class CVEDatabase:
                 params.append(f"%{version.lower()}%")
             results = _rows(where + " LIMIT 2000", params)
 
-        if len(self._cpe_cache) >= self._CPE_CACHE_LIMIT:
-            self._cpe_cache.pop(next(iter(self._cpe_cache)))
+        # Вытесняем самые старые выборки, пока кеш не уложится в бюджет.
+        # Сама выборка кладётся всегда, даже если она одна больше бюджета:
+        # иначе повторный запрос по крупному продукту шёл бы в базу каждый раз.
         self._cpe_cache[key] = results
+        cached_rows = sum(len(v) for v in self._cpe_cache.values())
+        while cached_rows > self._CPE_CACHE_ROWS and len(self._cpe_cache) > 1:
+            oldest = next(iter(self._cpe_cache))
+            cached_rows -= len(self._cpe_cache.pop(oldest))
         return results
 
     def smart_search_cves(self, component_name: str) -> List[Dict]:

@@ -15,16 +15,20 @@
 
 Правило выбора целей
 --------------------
-Каждый следующий этап уходит глубже, а целевой объект предыдущего этапа
-становится плацдармом для следующего:
+Атака идёт узел за узлом, всё дальше от точки входа, а целевой объект
+предыдущего этапа становится плацдармом для следующего:
 
     позиция = точка входа УБИ
     для каждого этапа N = 1…4:
         пустить волну из позиции
-        кандидаты = компоненты с уязвимостями, чей CWE попадает в профиль этапа
-        ЦО[N] = кандидат с наибольшей критичностью V по методике ФСТЭК
+        кандидаты = компоненты с уязвимостями класса αN на узлах,
+                    которые ещё не были целью и лежат не ближе предыдущего
+        ЦО[N] = этапы 1–3: ближайший узел, внутри него самый критичный
+                этап 4:    самый удалённый узел — там защищаемые данные
         маршрут[N] = обратный ход волны от ЦО[N] к позиции
         позиция = ЦО[N]
+
+Подробное обоснование двух разных критериев — в docstring build_kka_vector().
 
 Профили CWE взяты из колонки «Категории уязвимостей» схемы Shablon_atak.jpg
 напротив каждого этапа.
@@ -36,8 +40,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence, Set
 
-from models.wave import (WaveField, count_routes, propagate, rank_routes,
-                         restore_route)
+from models.wave import count_routes, propagate, restore_route
 
 __all__ = [
     "StageProfile",
@@ -169,18 +172,6 @@ def _cwe_numbers(raw: object) -> Set[int]:
     return {int(n) for n in _CWE_RE.findall(str(raw))}
 
 
-def _matches_profile(assessment, profile: StageProfile) -> bool:
-    """Подходит ли компонент под профиль этапа по классу слабости."""
-    if assessment is None:
-        return False
-    cwes = _cwe_numbers(getattr(assessment, "cwe_ids", "")
-                        or getattr(assessment, "h_category", ""))
-    # cwe_ids заполняется вызывающей стороной; если его нет — берём из CVE
-    if not cwes:
-        cwes = _cwe_numbers(getattr(assessment, "cve_cwe", ""))
-    return bool(cwes & profile.cwe_profile)
-
-
 def build_kka_vector(adjacency: Dict[str, Sequence[str]],
                      entry_point: str,
                      assessments: Dict[str, object],
@@ -305,20 +296,3 @@ def build_kka_vector(adjacency: Dict[str, Sequence[str]],
         result.append(stage)
 
     return result
-
-
-def critical_route(adjacency: Dict[str, Sequence[str]],
-                   entry_point: str,
-                   target: str,
-                   weight: Callable[[str], float]) -> List[str]:
-    """Маршрут наибольшей суммарной критичности от точки входа к цели.
-
-    В отличие от произвольного кратчайшего маршрута выбирает тот, который
-    проходит через самые критичные компоненты — именно его имеет смысл
-    показывать как основной.
-    """
-    wave = propagate(adjacency, [entry_point])
-    if target not in wave.distance:
-        return []
-    _, chosen = rank_routes(wave, weight)
-    return restore_route(wave, target, chosen)

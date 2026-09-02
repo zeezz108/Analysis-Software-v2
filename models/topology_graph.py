@@ -90,6 +90,33 @@ def _is_carrier(level_code: str, name: str) -> bool:
     return any(low.startswith(prefix) for prefix in allowed)
 
 
+# Соответствие типа порта стандарту физического уровня. Порт Ethernet
+# работает через IEEE 802.3 и не имеет отношения к Wi-Fi или WiMAX —
+# без этого соответствия волна проходила через чужие стандарты, и в
+# маршрутах появлялись бессмысленные шаги вида «IEEE 802.16» на узле,
+# где есть только витая пара.
+_PORT_MARKERS = (
+    ("rj-45",     "ieee 802.3"),
+    ("ethernet",  "ieee 802.3"),
+    ("pon",       "ieee 802.3"),
+    ("оптич",     "ieee 802.3"),
+    ("wi-fi",     "ieee 802.11"),
+    ("wifi",      "ieee 802.11"),
+    ("bluetooth", "ieee 802.15"),
+    ("wimax",     "ieee 802.16"),
+    ("usb",       "usb"),
+)
+
+
+def _port_standard(port_name: str) -> str:
+    """Стандарт физического уровня, соответствующий порту."""
+    low = port_name.lower()
+    for marker, standard in _PORT_MARKERS:
+        if marker in low:
+            return standard
+    return ""
+
+
 # ===================================================================
 # Вершина графа
 # ===================================================================
@@ -260,14 +287,22 @@ def _build_node(graph: TopologyGraph, node: "Node") -> None:
 
     node_id = node.id
 
-    # --- Точки входа: порт → физический уровень ---
+    # --- Точки входа: порт → свой стандарт физического уровня ---
     entry_ids = [vid for vid in graph.by_node.get(node_id, [])
                  if graph.vertices[vid].is_entry_point]
     physical = graph.vertices_of_level(node_id, "f")
+
     for entry in entry_ids:
-        for target in physical:
+        standard = _port_standard(graph.vertices[entry].name)
+        matched = [vid for vid in physical
+                   if standard
+                   and graph.vertices[vid].name.lower().startswith(standard)]
+        # Если стандарт не распознан или его нет среди компонентов —
+        # соединяем со всем физическим уровнем, чтобы не разорвать граф
+        for target in (matched or physical):
             graph.connect(entry, target)
-    # Если физических протоколов нет, порт ведёт сразу на канальный уровень
+
+    # Если физических протоколов нет вовсе, порт ведёт сразу на канальный
     if not physical:
         for entry in entry_ids:
             for target in graph.vertices_of_level(node_id, "z"):
@@ -325,41 +360,94 @@ def _build_node(graph: TopologyGraph, node: "Node") -> None:
             graph.connect(driver, target, both=removable)
 
 
-def _connect_nodes(graph: TopologyGraph, board: "Board") -> None:
+def _port_vertex(graph: TopologyGraph, node: "Node",
+                 port_id: str) -> Optional[str]:
+    """Находит вершину точки входа, соответствующую порту узла."""
+    entries = [vid for vid in graph.by_node.get(node.id, [])
+               if graph.vertices[vid].is_entry_point]
+    if not entries:
+        return None
+
+    port_name = ""
+    for port in node.ports:
+        if port.get("port_id") == port_id:
+            port_name = port.get("name", "")
+            break
+
+    # Ищем по имени порта; если не нашли — берём первую точку входа узла
+    return next((vid for vid in entries
+                 if port_name and port_name in graph.vertices[vid].name),
+                entries[0])
+
+
+def _connect_nodes(graph: TopologyGraph, board: "Board",
+                   skipped: Set[str]) -> None:
     """Связывает узлы через физические линии связи.
 
     Это единственные рёбра, выводящие волну за пределы узла — на эталонной
     схеме им соответствует шаг χ3.5, переход с порта маршрутизатора
     на порт сервера.
+
+    Отдельно обрабатывается транзит через неразложенные узлы. «Интернет» —
+    абстрактный провайдер без собственной архитектуры, он не раскладывается
+    на компоненты, но именно через него на плакате соединены зоны ТИМ-1,
+    ТИМ-2 и ТИМ-3. Если просто пропустить такой узел, граф распадётся
+    на несвязные куски и волна застрянет в первой зоне. Поэтому всё, что
+    подключено к цепочке пропущенных узлов, соединяется напрямую.
     """
+    # --- Прямые связи между разложенными узлами ---
     for link in board.links:
         if link.a is None or link.b is None:
             continue
+        if link.a.id in skipped or link.b.id in skipped:
+            continue
 
-        port_a = link.ports_connected.get("a", "")
-        port_b = link.ports_connected.get("b", "")
+        end_a = _port_vertex(graph, link.a, link.ports_connected.get("a", ""))
+        end_b = _port_vertex(graph, link.b, link.ports_connected.get("b", ""))
+        if end_a and end_b:
+            graph.connect(end_a, end_b)
 
-        ends = []
-        for node, port_id in ((link.a, port_a), (link.b, port_b)):
-            entries = [vid for vid in graph.by_node.get(node.id, [])
-                       if graph.vertices[vid].is_entry_point]
-            if not entries:
-                ends.append(None)
-                continue
-            # Ищем вершину порта по его имени; если не нашли — берём первый
-            port_name = ""
-            for port in node.ports:
-                if port.get("port_id") == port_id:
-                    port_name = port.get("name", "")
-                    break
-            matched = next(
-                (vid for vid in entries
-                 if port_name and port_name in graph.vertices[vid].name),
-                entries[0])
-            ends.append(matched)
+    if not skipped:
+        return
 
-        if all(ends):
-            graph.connect(ends[0], ends[1])
+    # --- Транзит через пропущенные узлы ---
+    # Пропущенные узлы могут соединяться друг с другом, поэтому сначала
+    # находим их связные группы, а потом сшиваем всё, что к группе подключено.
+    transit_links: Dict[str, Set[str]] = {n: set() for n in skipped}
+    attached: Dict[str, List[str]] = {n: [] for n in skipped}
+
+    for link in board.links:
+        if link.a is None or link.b is None:
+            continue
+        a_skipped, b_skipped = link.a.id in skipped, link.b.id in skipped
+        if a_skipped and b_skipped:
+            transit_links[link.a.id].add(link.b.id)
+            transit_links[link.b.id].add(link.a.id)
+        elif a_skipped or b_skipped:
+            transit, real, port_key = ((link.a, link.b, "b") if a_skipped
+                                       else (link.b, link.a, "a"))
+            vertex = _port_vertex(graph, real,
+                                  link.ports_connected.get(port_key, ""))
+            if vertex:
+                attached[transit.id].append(vertex)
+
+    # Обход групп: все концы одной группы видят друг друга
+    unvisited = set(skipped)
+    while unvisited:
+        stack = [unvisited.pop()]
+        group_ends: List[str] = []
+        while stack:
+            current = stack.pop()
+            group_ends.extend(attached.get(current, []))
+            for neighbour in transit_links.get(current, ()):
+                if neighbour in unvisited:
+                    unvisited.discard(neighbour)
+                    stack.append(neighbour)
+
+        unique_ends = list(dict.fromkeys(group_ends))
+        for i, source in enumerate(unique_ends):
+            for target in unique_ends[i + 1:]:
+                graph.connect(source, target)
 
 
 def _mark_roles(graph: TopologyGraph) -> None:
@@ -385,11 +473,12 @@ def build_topology_graph(board: "Board",
     """
     graph = TopologyGraph()
 
+    skipped = {node.id for node in board.nodes if node.type in skip_types}
     for node in board.nodes:
-        if node.type in skip_types:
+        if node.id in skipped:
             continue
         _build_node(graph, node)
 
-    _connect_nodes(graph, board)
+    _connect_nodes(graph, board, skipped)
     _mark_roles(graph)
     return graph

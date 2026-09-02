@@ -36,8 +36,8 @@ import customtkinter as ctk
 
 from models.kka import STAGE_PROFILES, KKAStage, build_kka_vector
 from models.topology_graph import TopologyGraph, build_topology_graph
-from models.wave import (WaveField, count_routes, propagate, rank_routes,
-                         restore_route)
+from models.wave import (WaveField, count_routes, iter_routes, propagate,
+                         rank_routes, restore_route)
 from utils.theme import c, color, sp
 
 __all__ = ["show_kka_routes"]
@@ -89,6 +89,10 @@ class KKARoutesView:
         self.field: Optional[WaveField] = None
         self.counts: Dict[str, int] = {}
         self.entry_id: str = ""
+        # Вершина, из которой пущена текущая волна. Совпадает с точкой входа,
+        # но при показе этапа ККА волна пускается из его собственного начала
+        self.wave_source: str = ""
+        self._row_ids: Dict[str, str] = {}
         self.assessments: Dict[str, object] = {}
         self.cwe_map: Dict[str, Set[int]] = {}
         self.stages: List[KKAStage] = []
@@ -312,6 +316,7 @@ class KKARoutesView:
     def _set_entry(self, entry_id: str) -> None:
         """Пускает волну из выбранной точки входа и перерисовывает всё."""
         self.entry_id = entry_id
+        self.wave_source = entry_id
         self.field = propagate(self.graph.adjacency, [entry_id])
         self.counts = count_routes(self.field)
         self.selected_target = ""
@@ -323,7 +328,7 @@ class KKARoutesView:
             text=f"Вершин {total} · рёбер {self.graph.edge_count} · "
                  f"достигнуто {reached} · глубина {self.field.max_depth}")
         self._legend.configure(
-            text="цвет — номер шага волны, размер — критичность")
+            text="цвет — номер шага волны; размер появится после оценки")
 
         self._fill_targets()
         self._draw_field()
@@ -358,8 +363,9 @@ class KKARoutesView:
         else:
             rows.sort(key=lambda r: (self.field.distance[r[0]], r[1].node_name))
 
+        SHOWN_LIMIT = 400
         self._row_ids = {}
-        for vid, vertex, crit in rows[:400]:
+        for vid, vertex, crit in rows[:SHOWN_LIMIT]:
             item = self._targets.insert("", tk.END, values=(
                 vertex.node_name,
                 vertex.name[:26],
@@ -370,9 +376,11 @@ class KKARoutesView:
             self._row_ids[item] = vid
 
         if self._assessed:
-            self._status.configure(
-                text=f"Уязвимых целей: {len(rows)}",
-                text_color=color("text_secondary"))
+            note = (f"Уязвимых целей: {len(rows)}"
+                    + (f" (показаны первые {SHOWN_LIMIT})"
+                       if len(rows) > SHOWN_LIMIT else ""))
+            self._status.configure(text=note,
+                                   text_color=color("text_secondary"))
 
     def _on_target_selected(self, _event=None) -> None:
         selection = self._targets.selection()
@@ -486,7 +494,7 @@ class KKARoutesView:
             outline, width = "", 0
             if vid in route_set:
                 outline, width = "#D97706", sp(2)
-            if vid == self.entry_id:
+            if vid == self.wave_source:
                 outline, width = "#2563EB", sp(3)
             if vid == self.selected_target:
                 outline, width = "#DC2626", sp(3)
@@ -533,7 +541,6 @@ class KKARoutesView:
         if self._alt_index == 0:
             return restore_route(self.field, self.selected_target, chosen)
 
-        from models.wave import iter_routes
         routes = list(iter_routes(self.field, self.selected_target,
                                   limit=self._alt_index + 1))
         if not routes:
@@ -590,7 +597,7 @@ class KKARoutesView:
                                corner_radius=sp(5))
             row.pack(fill=tk.X, pady=sp(2))
 
-            marker = "ω" if vid == self.entry_id else f"χ.{i}"
+            marker = "ω" if vid == self.wave_source else f"χ.{i}"
             ctk.CTkLabel(row, text=marker, width=sp(42),
                          font=("Consolas", sp(11), "bold"),
                          text_color=color("warning")).pack(
@@ -834,11 +841,16 @@ class KKARoutesView:
 
     def _show_stage(self, stage: KKAStage) -> None:
         """Показывает маршрут выбранного этапа на поле и справа."""
-        self.selected_target = stage.target_id
-        self._alt_index = 0
-        # Волну для этапа пускаем из его собственного источника
+        # Волна для этапа пускается из его собственного начала, поэтому
+        # переключается всё окно целиком: и поле, и список целей.
+        # Иначе номера шагов и счётчики маршрутов в списке остались бы
+        # от прежней волны и не совпадали бы с показанным маршрутом
+        self.wave_source = stage.source_id
         self.field = propagate(self.graph.adjacency, [stage.source_id])
         self.counts = count_routes(self.field)
+        self.selected_target = stage.target_id
+        self._alt_index = 0
+        self._fill_targets()
         self._show_route(stage.target_id)
         self._draw_field()
 
