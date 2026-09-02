@@ -20,3 +20,6 @@ config/scaling.json
 config/theme.json
 config/recent_topologies.json
 schemes/
+
+# Скачиваемый исходник CAPEC — не нужен в репозитории
+scripts/capec_latest.xml

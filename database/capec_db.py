@@ -165,14 +165,106 @@ class CAPECDatabase:
         ]},
     }
 
+    # ── Категория CAPEC → этап ККА ─────────────────────────────────────────
+    #
+    # Первые четыре взяты прямо с эталонной схемы Shablon_atak.jpg: там каждый
+    # этап начинается со своей категории, а её состав (Has_Member) образует
+    # колонку «Типы шаблонов ПКА». Это точное соответствие, не толкование.
+    #
+    # Остальные категории механизмов атак распределены по родству механизма.
+    # Это уже интерпретация: на схеме их нет, но оставлять их без этапа значит
+    # возвращаться к угадыванию по ключевым словам.
+    _CATEGORY_STAGE = {
+        # --- Точно по эталонной схеме ---
+        118: 1,   # Collect and Analyze Information  — сбор и анализ информации
+        255: 2,   # Manipulate Data Structures       — манипулирование структурами данных
+        152: 3,   # Inject Unexpected Items          — ввод непредусмотренных элементов
+        225: 4,   # Subvert Access Control           — нарушение контроля доступа
+        # --- Отнесены по родству механизма ---
+        403: 1,   # Social Engineering               — разведка и легализация
+        156: 1,   # Engage in Deceptive Interactions — обман на входе
+        223: 1,   # Employ Probabilistic Techniques  — сюда попадает брутфорс,
+                  #                                    а это тип атаки этапа 1 на плакате
+        172: 2,   # Manipulate Timing and State      — состояние и гонки, как и структуры данных
+        210: 4,   # Abuse Existing Functionality     — злоупотребление функциями
+        262: 4,   # Manipulate System Resources      — воздействие на ресурсы системы
+    }
+
+    _STAGE_NAMES = {
+        1: "Этап 1: Внедрение и легализация",
+        2: "Этап 2: Распространение",
+        3: "Этап 3: Повышение привилегий",
+        4: "Этап 4: НСД к информации",
+    }
+
+    # Насколько глубоко подниматься по ChildOf в поисках категории
+    _MAX_HIERARCHY_DEPTH = 5
+
+    def get_category_stage(self, capec_id: int) -> Optional[str]:
+        """Определяет этап ККА подъёмом по иерархии CAPEC до категории.
+
+        Detailed → Standard → Meta → Category — ровно та цепочка, что нарисована
+        на эталонной схеме, где у каждого шаблона указан уровень абстракции
+        буквой: 118C → 169M → 292S → 285D.
+
+        Returns:
+            Название этапа или None, если категория не найдена или не отнесена
+            ни к одному этапу
+        """
+        if not self._connection:
+            return None
+
+        cursor = self._connection.cursor()
+        seen = {str(capec_id)}
+        frontier = [str(capec_id)]
+
+        for _ in range(self._MAX_HIERARCHY_DEPTH):
+            if not frontier:
+                break
+
+            placeholders = ",".join("?" * len(frontier))
+
+            # Категория текущего уровня
+            cursor.execute(
+                f"SELECT related_id FROM capec_relations "
+                f"WHERE nature = 'MemberOf' AND capec_id IN ({placeholders})",
+                frontier)
+            for row in cursor.fetchall():
+                try:
+                    stage = self._CATEGORY_STAGE.get(int(row["related_id"]))
+                except (TypeError, ValueError):
+                    continue
+                if stage:
+                    return self._STAGE_NAMES[stage]
+
+            # Поднимаемся на уровень абстракции выше
+            cursor.execute(
+                f"SELECT related_id FROM capec_relations "
+                f"WHERE nature = 'ChildOf' AND capec_id IN ({placeholders})",
+                frontier)
+            parents = [str(r["related_id"]) for r in cursor.fetchall()]
+            frontier = [p for p in parents if p not in seen]
+            seen.update(frontier)
+
+        return None
+
     def get_bdu_stage(self, capec_id: int) -> str:
         """Определяет этап ККА для данного CAPEC.
 
-        Цепочка: CAPEC → ATT&CK technique ID → Этап ККА (1–4).
-        Если ATT&CK привязки нет — keyword-fallback по name/description CAPEC.
+        Порядок источников — от точного к приблизительному:
+
+        1. Иерархия CAPEC: шаблон → его категория → этап. Именно так этапы
+           заданы на эталонной схеме, поэтому это основной путь.
+        2. ATT&CK technique ID из таксономии.
+        3. Ключевые слова в названии и описании — последнее средство.
         """
         if not self._connection:
             return "--"
+
+        # Шаг 0: подъём по иерархии до категории
+        by_category = self.get_category_stage(capec_id)
+        if by_category:
+            return by_category
 
         cursor = self._connection.cursor()
 
