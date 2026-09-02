@@ -102,6 +102,9 @@ class KKARoutesView:
         # --- Отрисовка ---
         self.vpos: Dict[str, Tuple[int, int]] = {}
         self._assessed = False
+        self._zoom = 1.0
+        self._fitted = False
+        self._content = (0, 0)   # размер поля волны в масштабе 1:1
 
         if not self.graph.entry_points:
             messagebox.showinfo(
@@ -124,7 +127,8 @@ class KKARoutesView:
                 f"{self.window.winfo_screenwidth()}x"
                 f"{self.window.winfo_screenheight()}+0+0")
 
-        # Первая волна — из первой точки входа
+        # Первая волна — из первой точки входа. Поле вписывается в окно
+        # по событию <Configure>, когда холст получит реальные размеры
         self._set_entry(self.graph.entry_points[0])
 
     # ==================================================================
@@ -251,10 +255,24 @@ class KKARoutesView:
         header.pack(fill=tk.X, padx=sp(12), pady=(sp(8), 0))
         ctk.CTkLabel(header, text="Поле волны — все маршруты сразу",
                      font=("Segoe UI", sp(13), "bold")).pack(side=tk.LEFT)
+
+        # Управление масштабом: поле волны на широкой топологии не помещается
+        # в экран целиком, поэтому по умолчанию оно вписывается в окно
+        for text, command, width in (("−", self._zoom_out, 30),
+                                     ("+", self._zoom_in, 30),
+                                     ("1:1", self._zoom_reset, 44),
+                                     ("Вписать", self._zoom_fit, 74)):
+            ctk.CTkButton(header, text=text, width=sp(width), height=sp(24),
+                          font=("Segoe UI", sp(11)),
+                          fg_color=color("ghost_bg"),
+                          hover_color=color("ghost_hover"),
+                          text_color=color("text_primary"),
+                          command=command).pack(side=tk.RIGHT, padx=sp(2))
+
         self._legend = ctk.CTkLabel(
             header, text="", font=("Segoe UI", sp(11)),
             text_color=color("text_secondary"))
-        self._legend.pack(side=tk.RIGHT)
+        self._legend.pack(side=tk.RIGHT, padx=(0, sp(12)))
 
         wrap = tk.Frame(center, bg=c("canvas_bg"))
         wrap.pack(fill=tk.BOTH, expand=True, padx=sp(10), pady=sp(10))
@@ -274,6 +292,18 @@ class KKARoutesView:
         wrap.grid_columnconfigure(0, weight=1)
 
         self.canvas.bind("<Button-1>", self._on_canvas_click)
+        # Вписываем схему, когда холст впервые получит реальные размеры.
+        # Отложенный вызов через after ненадёжен: окно может быть ещё
+        # не размечено, и winfo_width() возвращает 1
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        # Ctrl + колесо — масштаб, просто колесо — прокрутка
+        self.canvas.bind("<Control-MouseWheel>", self._on_wheel_zoom)
+        self.canvas.bind(
+            "<MouseWheel>",
+            lambda e: self.canvas.yview_scroll(-1 if e.delta > 0 else 1, "units"))
+        self.canvas.bind(
+            "<Shift-MouseWheel>",
+            lambda e: self.canvas.xview_scroll(-1 if e.delta > 0 else 1, "units"))
 
     # ----- Правая панель -----
 
@@ -397,32 +427,31 @@ class KKARoutesView:
     # Поле волны
     # ==================================================================
 
-    def _draw_field(self) -> None:
-        """Рисует поле волны: дорожка на узел, по X — номер фронта."""
-        self.canvas.delete("all")
-        self.vpos.clear()
-        if not self.field:
-            return
+    def _zs(self, value: int) -> int:
+        """Масштабирует размер под текущий зум."""
+        return max(1, int(value * self._zoom))
 
-        step_x = sp(46)
-        left_pad = sp(150)
-        top_pad = sp(34)
-        row_h = sp(15)
-        lane_gap = sp(22)
+    def _layout_field(self):
+        """Считает раскладку поля волны в масштабе 1:1.
+
+        Дорожка на каждый узел, по горизонтали — номер волнового фронта.
+        Раскладка отделена от отрисовки, чтобы знать размер содержимого
+        и уметь вписывать его в окно.
+        """
+        step_x, left_pad, top_pad = sp(46), sp(150), sp(34)
+        row_h, lane_gap = sp(15), sp(22)
 
         # Узлы — в порядке появления волны
         first_seen: Dict[str, int] = {}
         for vid in self.field.order:
             node_id = self.graph.vertices[vid].node_id
             first_seen.setdefault(node_id, self.field.distance[vid])
-        lanes = sorted(first_seen, key=lambda n: first_seen[n])
 
-        # Раскладка внутри дорожки: колонка = глубина
+        positions: Dict[str, Tuple[int, int]] = {}
+        lanes: List[Tuple[str, str, int, int]] = []   # узел, имя, y, высота
         y = top_pad
-        max_x = left_pad
-        route_set = set(self._current_route()) if self.selected_target else set()
 
-        for node_id in lanes:
+        for node_id in sorted(first_seen, key=lambda n: first_seen[n]):
             by_depth: Dict[int, List[str]] = defaultdict(list)
             for vid in self.graph.by_node.get(node_id, []):
                 if vid in self.field.distance:
@@ -434,70 +463,88 @@ class KKARoutesView:
             node_name = next(
                 (self.graph.vertices[v].node_name
                  for v in self.graph.by_node[node_id]), node_id)
-
-            # Полоса дорожки
-            self.canvas.create_rectangle(
-                sp(8), y - sp(6), left_pad - sp(10), y + height + sp(6),
-                fill=c("surface"), outline="")
-            self.canvas.create_text(
-                sp(16), y + height / 2, anchor="w", text=node_name,
-                font=("Segoe UI", sp(10), "bold"), fill=c("text_primary"))
+            lanes.append((node_id, node_name, y, height))
 
             for depth, ids in by_depth.items():
                 for i, vid in enumerate(sorted(ids)):
-                    x = left_pad + depth * step_x
-                    py = y + i * row_h
-                    self.vpos[vid] = (x, py)
-                    max_x = max(max_x, x)
+                    positions[vid] = (left_pad + depth * step_x, y + i * row_h)
 
             y += height + lane_gap
 
+        width = left_pad + (self.field.max_depth + 1) * step_x + sp(40)
+        return positions, lanes, y, width
+
+    def _draw_field(self) -> None:
+        """Рисует поле волны в текущем масштабе."""
+        self.canvas.delete("all")
+        self.vpos.clear()
+        if not self.field:
+            return
+
+        positions, lanes, content_h, content_w = self._layout_field()
+        self._content = (content_w, content_h)
+        z = self._zoom
+
+        for vid, (x, y) in positions.items():
+            self.vpos[vid] = (int(x * z), int(y * z))
+
+        route = self._current_route() if self.selected_target else []
+        route_set = set(route)
+        label_font = ("Segoe UI", max(6, self._zs(sp(10))), "bold")
+        tick_font = ("Segoe UI", max(6, self._zs(sp(9))))
+
+        # Дорожки узлов
+        for _node_id, node_name, y, height in lanes:
+            self.canvas.create_rectangle(
+                self._zs(sp(8)), int((y - sp(6)) * z),
+                self._zs(sp(150) - sp(10)), int((y + height + sp(6)) * z),
+                fill=c("surface"), outline="")
+            self.canvas.create_text(
+                self._zs(sp(16)), int((y + height / 2) * z), anchor="w",
+                text=node_name, font=label_font, fill=c("text_primary"))
+
         # Сетка номеров фронтов
         for depth in range(self.field.max_depth + 1):
-            x = left_pad + depth * step_x
-            self.canvas.create_line(x, sp(20), x, y, fill=c("divider"),
-                                    dash=(2, 4))
-            self.canvas.create_text(
-                x, sp(12), text=str(depth),
-                font=("Segoe UI", sp(9)), fill=c("text_muted"))
+            x = int((sp(150) + depth * sp(46)) * z)
+            self.canvas.create_line(x, self._zs(sp(20)), x, int(content_h * z),
+                                    fill=c("divider"), dash=(2, 4))
+            self.canvas.create_text(x, self._zs(sp(12)), text=str(depth),
+                                    font=tick_font, fill=c("text_muted"))
         self.canvas.create_text(
-            sp(16), sp(12), anchor="w", text="шаг волны →",
-            font=("Segoe UI", sp(9)), fill=c("text_muted"))
+            self._zs(sp(16)), self._zs(sp(12)), anchor="w",
+            text="шаг волны →", font=tick_font, fill=c("text_muted"))
 
-        # Маршрут — линией поверх сетки, под вершинами
-        if len(route_set) > 1:
+        # Маршрут — линией под вершинами
+        if len(route) > 1:
             points = []
-            for vid in self._current_route():
+            for vid in route:
                 if vid in self.vpos:
                     points.extend(self.vpos[vid])
             if len(points) >= 4:
                 self.canvas.create_line(*points, fill="#D97706",
-                                        width=sp(3), smooth=False)
+                                        width=max(1, self._zs(sp(3))))
 
         # Вершины
+        base_r = max(2, self._zs(sp(4)))
         for vid, (x, py) in self.vpos.items():
-            vertex = self.graph.vertices[vid]
             assessment = self.assessments.get(vid)
             crit = getattr(assessment, "V", 0.0) if assessment else 0.0
 
-            radius = sp(4)
+            radius = base_r + (self._zs(min(int(crit), 6)) if crit > 0 else 0)
             if crit > 0:
-                radius = sp(4) + min(int(crit), 6)
-
-            if crit > 0:
-                level = getattr(assessment, "level", "Низкий")
-                fill = _LEVEL_COLORS.get(level, "#16A34A")
+                fill = _LEVEL_COLORS.get(
+                    getattr(assessment, "level", "Низкий"), "#16A34A")
             else:
                 fill = _depth_color(self.field.distance[vid],
                                     self.field.max_depth)
 
             outline, width = "", 0
             if vid in route_set:
-                outline, width = "#D97706", sp(2)
+                outline, width = "#D97706", max(1, self._zs(sp(2)))
             if vid == self.wave_source:
-                outline, width = "#2563EB", sp(3)
+                outline, width = "#2563EB", max(1, self._zs(sp(3)))
             if vid == self.selected_target:
-                outline, width = "#DC2626", sp(3)
+                outline, width = "#DC2626", max(1, self._zs(sp(3)))
 
             self.canvas.create_oval(
                 x - radius, py - radius, x + radius, py + radius,
@@ -505,7 +552,45 @@ class KKARoutesView:
                 tags=("vx", vid))
 
         self.canvas.configure(
-            scrollregion=(0, 0, max_x + sp(60), y + sp(20)))
+            scrollregion=(0, 0, int(content_w * z), int(content_h * z)))
+
+    # ----- Масштаб -----
+
+    def _apply_zoom(self, value: float) -> None:
+        self._zoom = max(0.15, min(3.0, value))
+        self._draw_field()
+
+    def _zoom_in(self) -> None:
+        self._apply_zoom(self._zoom * 1.25)
+
+    def _zoom_out(self) -> None:
+        self._apply_zoom(self._zoom / 1.25)
+
+    def _zoom_reset(self) -> None:
+        self._apply_zoom(1.0)
+
+    def _zoom_fit(self) -> None:
+        """Вписывает поле волны в видимую область холста."""
+        width, height = self._content
+        if width <= 0 or height <= 0:
+            return
+        try:
+            available_w = max(self.canvas.winfo_width(), 100)
+            available_h = max(self.canvas.winfo_height(), 100)
+        except Exception:
+            return
+        self._apply_zoom(min(available_w / width, available_h / height))
+
+    def _on_canvas_configure(self, event) -> None:
+        """Первое получение размеров холста — вписываем схему в окно."""
+        if self._fitted or event.width < 50 or event.height < 50:
+            return
+        self._fitted = True
+        self._zoom_fit()
+
+    def _on_wheel_zoom(self, event) -> None:
+        self._apply_zoom(self._zoom * (1.1 if event.delta > 0 else 1 / 1.1))
+
 
     def _on_canvas_click(self, event) -> None:
         """Выбор вершины на поле волны."""

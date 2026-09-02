@@ -517,6 +517,9 @@ class CanvasView:
         self.btn_osi_decomposition = self._make_sidebar_button(
             sec_analysis, "🔬  Схема ЭМВОС", self.show_osi_decomposition, variant="primary"
         )
+        self.btn_threat_graph_all = self._make_sidebar_button(
+            sec_analysis, "🕸  Общий граф угроз", self.show_threat_graph_all, variant="primary"
+        )
         self.btn_kka_routes = self._make_sidebar_button(
             sec_analysis, "🌊  Маршруты УБИ", self.show_kka_routes, variant="primary"
         )
@@ -820,6 +823,11 @@ class CanvasView:
         """Открывает окно схемы разложения топологии по ЭМВОС."""
         from views.osi_canvas_view import show_osi_decomposition
         show_osi_decomposition(self.root, self.board)
+
+    def show_threat_graph_all(self):
+        """Открывает общий граф угроз — все узлы топологии сразу."""
+        from views.threat_graph_all_view import show_threat_graph_all
+        show_threat_graph_all(self.root, self.board)
 
     def show_kka_routes(self):
         """Открывает окно маршрутов распространения УБИ (вектор ККА)."""
