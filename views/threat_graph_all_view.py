@@ -303,6 +303,12 @@ class ThreatGraphAllView:
             width=sp(250), font=("Segoe UI", sp(11)),
             command=self._on_entry_changed).pack(side=tk.LEFT, padx=sp(8))
 
+        ctk.CTkButton(
+            inner, text="Открыть в браузере", width=sp(160), height=sp(24),
+            font=("Segoe UI", sp(11)),
+            fg_color=color("accent"), hover_color=color("accent_hover"),
+            command=self._export_html).pack(side=tk.RIGHT, padx=sp(8))
+
         for text, command, width in (("−", self._zoom_out, 30),
                                      ("+", self._zoom_in, 30),
                                      ("1:1", self._zoom_reset, 44),
@@ -582,6 +588,53 @@ class ThreatGraphAllView:
 
     def _on_wheel_zoom(self, event) -> None:
         self._apply_zoom(self._zoom * (1.1 if event.delta > 0 else 1 / 1.1))
+
+    def _export_html(self) -> None:
+        """Сохраняет граф в HTML и открывает в браузере.
+
+        В браузере схема читается лучше: ширину текста меряет сам браузер,
+        подписи не наезжают, масштаб плавный. Готовую страницу можно
+        распечатать в PDF или отправить ссылкой.
+        """
+        import os
+        import tempfile
+        import webbrowser
+
+        from models.wave import propagate, restore_route
+        from utils.graph_html import build_graph_html
+
+        try:
+            routes = []
+            if self.route:
+                routes.append(("χ1", list(self.route)))
+            elif self.graph.entry_points:
+                # Без выбранного маршрута показываем по одному на узел,
+                # в порядке удаления от точки входа — как χ1…χ3 на эталоне
+                entry = self.graph.entry_points[0]
+                field = propagate(self.graph.adjacency, [entry])
+                deepest = {}
+                for vid, depth in field.distance.items():
+                    vertex = self.graph.vertices[vid]
+                    if vertex.is_entry_point:
+                        continue
+                    current = deepest.get(vertex.node_id)
+                    if current is None or depth > field.distance[current]:
+                        deepest[vertex.node_id] = vid
+                targets = sorted(deepest.values(),
+                                 key=lambda v: field.distance[v])
+                routes = [(f"χ{i}", restore_route(field, t))
+                          for i, t in enumerate(targets, start=1)]
+
+            page = build_graph_html(self.graph, self.board, routes=routes,
+                                    title="Общий граф угроз")
+            path = os.path.join(tempfile.gettempdir(), "threat_graph.html")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(page)
+            webbrowser.open("file:///" + path.replace("\\", "/"))
+        except Exception as exc:      # noqa: BLE001 — сообщаем пользователю
+            messagebox.showerror(
+                "Открыть в браузере",
+                "Не удалось построить страницу: " + str(exc))
 
     def _close(self) -> None:
         try:
