@@ -272,7 +272,7 @@ def build_graph_html(graph, board,
             f'data-role="{_esc(vertex.role)}" '
             f'data-type="{_esc(vertex.component_type)}" '
             f'transform="translate({x},{y})">'
-            f'<circle r="{V_RAD}" fill="#fff" stroke="{colour}" '
+            f'<circle r="{V_RAD}" fill="#FFFFFF" stroke="{colour}" '
             f'stroke-width="2.4"{" stroke-dasharray=\"5 3\"" if transit_only else ""}/>'
             f'<text class="ident" y="4">{_esc(vertex.identifier[:8])}</text>'
             f'<text class="name" y="{V_RAD + 15}">{_esc(label)}</text>'
@@ -310,19 +310,19 @@ def build_graph_html(graph, board,
 
 _STYLE = """<title>{title}</title>
 <style>
+/* Схема всегда светлая, независимо от темы системы: это технический
+   чертёж, его печатают и вставляют в документ, а тёмная подложка делает
+   цвета уровней нечитаемыми и съедает тонер при печати. */
 :root {{
-  --paper:#F1F4F7; --surface:#fff; --ink:#13181D; --muted:#56646F;
-  --rule:#D2DAE2; --accent:#0B5D6B;
-}}
-@media (prefers-color-scheme:dark) {{
-  :root {{ --paper:#0D1116; --surface:#151C23; --ink:#E4EAF0;
-           --muted:#9AAAB7; --rule:#2A3540; --accent:#58C4D6; }}
+  --paper:#FFFFFF; --surface:#FFFFFF; --ink:#111827; --muted:#4B5563;
+  --rule:#D6DCE3; --faint:#E6EAEF; --accent:#0B5D6B; --panel:#F7F9FB;
+  color-scheme:light;
 }}
 * {{ box-sizing:border-box; }}
 body {{ margin:0; background:var(--paper); color:var(--ink);
   font:14px/1.5 "Segoe UI",system-ui,sans-serif; overflow:hidden; }}
 header {{ display:flex; align-items:center; gap:18px; flex-wrap:wrap;
-  padding:10px 18px; background:var(--surface);
+  padding:10px 18px; background:var(--panel);
   border-bottom:1px solid var(--rule); }}
 h1 {{ font-size:16px; margin:0; font-weight:600; }}
 .stats {{ color:var(--muted); font-size:13px; }}
@@ -335,8 +335,8 @@ button:hover {{ border-color:var(--accent); }}
 main {{ display:flex; height:calc(100vh - 49px); }}
 #stage {{ flex:1; overflow:hidden; cursor:grab; background:var(--paper); }}
 #stage.drag {{ cursor:grabbing; }}
-aside {{ width:300px; border-left:1px solid var(--rule);
-  background:var(--surface); padding:16px; overflow:auto; }}
+aside {{ width:320px; border-left:1px solid var(--rule);
+  background:var(--panel); padding:16px; overflow:auto; }}
 aside h3 {{ font-size:13px; margin:0 0 10px; text-transform:uppercase;
   letter-spacing:.06em; color:var(--muted); }}
 aside dl {{ margin:0 0 18px; }}
@@ -347,16 +347,16 @@ aside dd {{ margin:2px 0 0; font-size:13px; word-break:break-word; }}
 .dot {{ display:inline-block; width:9px; height:9px; border-radius:50%;
   margin-right:7px; vertical-align:middle; }}
 svg {{ display:block; }}
-.block {{ fill:none; stroke:var(--rule); stroke-width:1.4;
+.block {{ fill:#FCFDFE; stroke:#C3CBD4; stroke-width:1.4;
   stroke-dasharray:7 5; }}
 .block-title {{ font-size:14px; font-weight:600; fill:var(--ink); }}
-.lvl {{ font-size:10.5px; font-weight:600; text-anchor:middle;
+.lvl {{ font-size:11px; font-weight:700; text-anchor:middle;
   letter-spacing:.02em; }}
-.intra {{ stroke:var(--rule); stroke-width:1; opacity:.55; }}
-.cross {{ stroke:#2563EB; stroke-width:2.4; opacity:.85; }}
-.ident {{ font-size:9px; text-anchor:middle; fill:var(--ink); }}
-.name {{ font-size:10px; text-anchor:middle; fill:var(--muted); }}
-.chi {{ font-size:9.5px; font-weight:700; text-anchor:middle; fill:#B45309; }}
+.intra {{ stroke:var(--faint); stroke-width:0.9; }}
+.cross {{ stroke:#1D4ED8; stroke-width:2.6; }}
+.ident {{ font-size:9.5px; font-weight:600; text-anchor:middle; fill:var(--ink); }}
+.name {{ font-size:10.5px; text-anchor:middle; fill:var(--muted); }}
+.chi {{ font-size:10px; font-weight:700; text-anchor:middle; fill:#B45309; }}
 .v {{ cursor:pointer; }}
 .v:hover circle {{ stroke-width:4; }}
 .v.sel circle {{ stroke:#DC2626 !important; stroke-width:4.5; }}
