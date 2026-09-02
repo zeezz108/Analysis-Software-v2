@@ -180,6 +180,70 @@ def _clean(name: str) -> str:
     return str(name).split("||")[0].strip().rstrip("- ").strip()
 
 
+def _orthogonal_path(start: Tuple[int, int], end: Tuple[int, int],
+                     channel_use: Dict[Tuple[int, int], int],
+                     wide: bool = False) -> str:
+    """Строит ортогональный маршрут ребра: горизонталь — вертикаль — горизонталь.
+
+    Прямые диагонали между двумя сотнями вершин превращаются в кашу.
+    Ортогональная разводка, как на печатной плате, читается гораздо лучше:
+    линия выходит из вершины вбок, идёт по вертикальному каналу между
+    колонками и входит в цель тоже сбоку.
+
+    Чтобы линии одного канала не легли друг на друга, каждой достаётся
+    своё смещение внутри канала. Углы скругляются.
+
+    Args:
+        start: координаты вершины-источника
+        end: координаты вершины-цели
+        channel_use: счётчик занятости каналов, общий на всю схему
+        wide: шире разносить — для заметных линий между узлами и маршрутов
+
+    Returns:
+        Значение атрибута d для <path>
+    """
+    x1, y1 = start
+    x2, y2 = end
+    gap = V_RAD + 5          # выходим за край кружка, а не из центра
+
+    # Одна колонка — простая вертикаль
+    if abs(x1 - x2) < 4:
+        step = gap if y2 > y1 else -gap
+        return f"M{x1},{y1 + step} L{x2},{y2 - step}"
+
+    # Одна строка — простая горизонталь
+    if abs(y1 - y2) < 4:
+        step = gap if x2 > x1 else -gap
+        return f"M{x1 + step},{y1} L{x2 - step},{y2}"
+
+    # Разные колонки: вертикальный канал между ними
+    key = (round(min(x1, x2)), round(max(x1, x2)))
+    slot = channel_use[key]
+    channel_use[key] += 1
+    spread = 30 if wide else 16
+    offset = ((slot % 7) - 3) * spread
+
+    sx = x1 + gap if x2 > x1 else x1 - gap
+    ex = x2 - gap if x2 > x1 else x2 + gap
+    mid = (sx + ex) / 2 + offset
+    # Канал должен остаться между концами, иначе линия пойдёт назад
+    low, high = min(sx, ex), max(sx, ex)
+    mid = max(low + 12, min(high - 12, mid))
+
+    dx_in = 1 if mid > sx else -1
+    dx_out = 1 if ex > mid else -1
+    dy = 1 if y2 > y1 else -1
+    corner = min(18.0, abs(mid - sx) / 2, abs(ex - mid) / 2,
+                 abs(y2 - y1) / 2)
+
+    return (f"M{sx:.0f},{y1:.0f} "
+            f"L{mid - dx_in * corner:.0f},{y1:.0f} "
+            f"Q{mid:.0f},{y1:.0f} {mid:.0f},{y1 + dy * corner:.0f} "
+            f"L{mid:.0f},{y2 - dy * corner:.0f} "
+            f"Q{mid:.0f},{y2:.0f} {mid + dx_out * corner:.0f},{y2:.0f} "
+            f"L{ex:.0f},{y2:.0f}")
+
+
 def build_graph_html(graph, board,
                      routes: Optional[Sequence[Tuple[str, List[str]]]] = None,
                      title: str = "Общий граф угроз",
@@ -225,10 +289,11 @@ def build_graph_html(graph, board,
     # --- Рёбра ---
     drawn = set()
     edges_intra, edges_cross, edges_route = [], [], []
+    channel_use: Dict[Tuple[int, int], int] = defaultdict(int)
+
     for source, targets in graph.adjacency.items():
         if source not in pos:
             continue
-        x1, y1 = pos[source]
         node_a = graph.vertices[source].node_id
         for target in targets:
             if target not in pos:
@@ -237,16 +302,20 @@ def build_graph_html(graph, board,
             if key in drawn:
                 continue
             drawn.add(key)
-            x2, y2 = pos[target]
-            line = f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}"'
+
             route = route_of_edge.get((source, target))
+            crosses = graph.vertices[target].node_id != node_a
+            path = _orthogonal_path(pos[source], pos[target], channel_use,
+                                    wide=crosses or route is not None)
+
             if route is not None:
                 colour = ROUTE_COLORS[route % len(ROUTE_COLORS)]
-                edges_route.append(f'{line} stroke="{colour}" stroke-width="8"/>')
-            elif graph.vertices[target].node_id != node_a:
-                edges_cross.append(f'{line} class="cross"/>')
+                edges_route.append(
+                    f'<path d="{path}" stroke="{colour}" stroke-width="8"/>')
+            elif crosses:
+                edges_cross.append(f'<path d="{path}" class="cross"/>')
             else:
-                edges_intra.append(f'{line} class="intra"/>')
+                edges_intra.append(f'<path d="{path}" class="intra"/>')
 
     parts.append(f'<g id="intra">{"".join(edges_intra)}</g>')
     parts.append(f'<g id="cross">{"".join(edges_cross)}</g>')
@@ -349,13 +418,16 @@ aside dd {{ margin:2px 0 0; font-size:13px; word-break:break-word; }}
 .dot {{ display:inline-block; width:9px; height:9px; border-radius:50%;
   margin-right:7px; vertical-align:middle; }}
 svg {{ display:block; }}
+#routes path {{ fill:none; stroke-linejoin:round; stroke-linecap:round; }}
 .block {{ fill:#FCFDFE; stroke:#C3CBD4; stroke-width:2.8;
   stroke-dasharray:14 10; }}
 .block-title {{ font-size:28px; font-weight:600; fill:var(--ink); }}
 .lvl {{ font-size:22px; font-weight:700; text-anchor:middle;
   letter-spacing:.02em; }}
-.intra {{ stroke:var(--faint); stroke-width:1.8; }}
-.cross {{ stroke:#1D4ED8; stroke-width:5.2; }}
+.intra {{ fill:none; stroke:var(--faint); stroke-width:1.8;
+  stroke-linejoin:round; stroke-linecap:round; }}
+.cross {{ fill:none; stroke:#1D4ED8; stroke-width:5.2;
+  stroke-linejoin:round; stroke-linecap:round; }}
 .ident {{ font-size:19px; font-weight:600; text-anchor:middle; fill:var(--ink); }}
 .name {{ font-size:21px; text-anchor:middle; fill:var(--muted); }}
 .chi {{ font-size:20px; font-weight:700; text-anchor:middle; fill:#B45309; }}
@@ -363,7 +435,7 @@ svg {{ display:block; }}
 .v:hover circle {{ stroke-width:8; }}
 .v.sel circle {{ stroke:#DC2626 !important; stroke-width:9; }}
 .v.dim {{ opacity:.16; }}
-line.dim {{ opacity:.05; }}
+path.dim {{ opacity:.05; }}
 body.hide-intra #intra {{ display:none; }}
 </style>"""
 
@@ -426,7 +498,7 @@ document.getElementById('tc').onchange=e=>
 
 const verts=[...document.querySelectorAll('.v')];
 function clearSel(){{ verts.forEach(v=>v.classList.remove('sel','dim'));
-  document.querySelectorAll('line').forEach(l=>l.classList.remove('dim')); }}
+  document.querySelectorAll('#intra path,#cross path').forEach(l=>l.classList.remove('dim')); }}
 document.getElementById('reset').onclick=()=>{{ clearSel();
   info.innerHTML='<dd style="color:var(--muted)">Щёлкните вершину графа</dd>'; }};
 
