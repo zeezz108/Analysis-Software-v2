@@ -68,6 +68,32 @@ LEVEL_LABELS = {
     GraphLevel.USER: "Пользовательский\nуровень",
 }
 
+# Коды уровней модели УБИ для фильтрации CVE (utils/level_filter.py).
+#
+# Это НЕ то же самое, что LEVEL_PREFIXES ниже: там аппаратный уровень помечен
+# буквой «h», а пользовательский — «u», тогда как в эталонном паспорте и на
+# схеме ЭМВОС аппаратный обозначается «а», а «h» закреплено за пользовательским
+# уровнем. Пока префиксы отрисовки оставлены как есть, а для подбора профиля
+# уязвимостей используется соответствие, совпадающее с паспортом.
+GRAPH_LEVEL_CODES = {
+    GraphLevel.ENTRY_POINT:    "f",   # Точки входа — физические порты
+    GraphLevel.PHYSICAL:       "f",
+    GraphLevel.DATA_LINK:      "z",
+    GraphLevel.NETWORK:        "l",
+    GraphLevel.DRIVERS:        "i",
+    GraphLevel.ACCESS_CONTROL: "w",
+    GraphLevel.FILE_SYSTEM:    "p",
+    GraphLevel.PROCESS_MGMT:   "v",
+    GraphLevel.TRANSPORT:      "t",
+    GraphLevel.SESSION:        "d",
+    GraphLevel.PRESENTATION:   "r",
+    GraphLevel.APPLICATION:    "q",
+    GraphLevel.NET_APPS:       "q",   # Сетевые приложения — прикладной уровень
+    GraphLevel.HARDWARE:       "a",   # Аппаратный уровень модели УБИ
+    GraphLevel.USER:           "h",   # Пользовательский уровень модели УБИ
+}
+
+
 # Краткие префиксы для идентификаторов вершин
 LEVEL_PREFIXES = {
     GraphLevel.ENTRY_POINT: "ω",
@@ -126,6 +152,42 @@ class ThreatGraph:
         """Возвращает список уровней, где есть хотя бы одна вершина."""
         levels = sorted(set(v.level for v in self.vertices))
         return levels
+
+    def roles(self) -> Dict[str, str]:
+        """Определяет роль каждой вершины: ЦО, ТрО или «ЦО, ТрО».
+
+        Легенда плаката «Комплексные компьютерные атаки»: сплошной кружок —
+        целевой объект, пунктирный — транзитный. На эталонном графе узла
+        (Grafy_1_ARM.jpg) точки входа ω1…ω7 помечены только «ТрО», тупиковые
+        компоненты — только «ЦО», всё остальное — «ЦО, ТрО».
+
+        Отсюда правило:
+            ТрО — у вершины есть исходящие рёбра: угроза проходит дальше
+            ЦО  — вершина не является точкой входа: по ней можно ударить
+
+        Это структурное свойство графа. Прежняя реализация выводила роль
+        из наличия найденных CVE («есть уязвимости → ЦО»), что не совпадает
+        ни с легендой плаката, ни с эталонным графом: там роли расставлены
+        до всякого поиска уязвимостей.
+
+        Returns:
+            Словарь «идентификатор вершины → подпись роли»
+        """
+        outgoing = {edge.source_id for edge in self.edges}
+        result: Dict[str, str] = {}
+        for vertex in self.vertices:
+            is_entry = vertex.level == GraphLevel.ENTRY_POINT
+            is_transit = vertex.id in outgoing
+            is_target = not is_entry
+            if is_target and is_transit:
+                result[vertex.id] = "ЦО, ТрО"
+            elif is_target:
+                result[vertex.id] = "ЦО"
+            elif is_transit:
+                result[vertex.id] = "ТрО"
+            else:
+                result[vertex.id] = ""
+        return result
 
 
 # ============================================================================

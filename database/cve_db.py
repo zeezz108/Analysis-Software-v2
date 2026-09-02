@@ -559,39 +559,88 @@ class CVEDatabase:
     # ПОИСК CVE — через JOIN с нормализованными таблицами
     # =================================================================
 
+    # Максимум записей в кеше выборок по CPE (одна выборка ~ несколько МБ)
+    _CPE_CACHE_LIMIT = 24
+
     def get_cves_for_component(self, vendor: str,
                                 product: str = None,
                                 version: str = None) -> List[Dict]:
-        """Ищет CVE для vendor+product+version через JOIN."""
+        """Ищет CVE для vendor+product+version через JOIN.
+
+        Возвращает полную выборку по CPE вместе с описанием и датой публикации —
+        отбор нужных уязвимостей выполняется дальше по уровню модели
+        (см. utils/level_filter.py). Раньше здесь стоял `LIMIT 200` без
+        сортировки, из-за чего наверх всегда всплывали записи 1999 года.
+
+        Запрос построен под индекс idx_cpe_vendor_product: vendor сравнивается
+        точно, product — по префиксу. Это в 20-30 раз быстрее, чем `LIKE '%...%'`
+        с обеих сторон, и сохраняет охват (windows → windows_10,
+        windows_server_2019 и т.д.). Если точный vendor ничего не дал,
+        выполняется прежний широкий поиск.
+
+        Результат кешируется по ключу (vendor, product, version): десятки
+        протоколов узла отображаются на один и тот же CPE, поэтому тяжёлый
+        запрос выполняется однократно.
+        """
+        key = (vendor.lower(), (product or "").lower(), (version or "").lower())
+        if not hasattr(self, "_cpe_cache"):
+            self._cpe_cache = {}
+        if key in self._cpe_cache:
+            return self._cpe_cache[key]
+
         cursor = self._connection.cursor()
 
-        query = """
-            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+        select = """
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4,
+                            c.cwe_id, c.description, c.published
             FROM cve_entries c
             JOIN cve_cpe_map m ON c.cve_id = m.cve_id
             JOIN cpe_entries p ON m.cpe_id = p.id
-            WHERE p.vendor LIKE ?
         """
-        params = [f"%{vendor.lower()}%"]
-        if product:
-            query += " AND p.product LIKE ?"
-            params.append(f"%{product.lower()}%")
-        if version:
-            query += " AND (p.version LIKE ? OR p.version = '*' OR p.version = '-')"
-            params.append(f"%{version.lower()}%")
-        query += " LIMIT 200"
 
-        cursor.execute(query, params)
-        return [
-            {
-                "cve_id": r["cve_id"],
-                "cvss_v2": r["cvss_v2"],
-                "cvss_v3": r["cvss_v3"],
-                "cvss_v4": r["cvss_v4"],
-                "cwe_id": r["cwe_id"] or "",
-            }
-            for r in cursor.fetchall()
-        ]
+        def _rows(where: str, params: list) -> List[Dict]:
+            cursor.execute(select + where, params)
+            return [
+                {
+                    "cve_id": r["cve_id"],
+                    "cvss_v2": r["cvss_v2"],
+                    "cvss_v3": r["cvss_v3"],
+                    "cvss_v4": r["cvss_v4"],
+                    "cwe_id": r["cwe_id"] or "",
+                    "description": r["description"] or "",
+                    "published": r["published"] or "",
+                }
+                for r in cursor.fetchall()
+            ]
+
+        # --- Быстрый путь: точный vendor + префикс product (по индексу) ---
+        where = "WHERE p.vendor = ?"
+        params = [vendor.lower()]
+        if product:
+            where += " AND p.product LIKE ?"
+            params.append(f"{product.lower()}%")
+        if version:
+            where += " AND (p.version LIKE ? OR p.version = '*' OR p.version = '-')"
+            params.append(f"%{version.lower()}%")
+
+        results = _rows(where, params)
+
+        # --- Запасной путь: прежний широкий поиск ---
+        if not results:
+            where = "WHERE p.vendor LIKE ?"
+            params = [f"%{vendor.lower()}%"]
+            if product:
+                where += " AND p.product LIKE ?"
+                params.append(f"%{product.lower()}%")
+            if version:
+                where += " AND (p.version LIKE ? OR p.version = '*' OR p.version = '-')"
+                params.append(f"%{version.lower()}%")
+            results = _rows(where + " LIMIT 2000", params)
+
+        if len(self._cpe_cache) >= self._CPE_CACHE_LIMIT:
+            self._cpe_cache.pop(next(iter(self._cpe_cache)))
+        self._cpe_cache[key] = results
+        return results
 
     def smart_search_cves(self, component_name: str) -> List[Dict]:
         """Умный поиск CVE: разбивает название компонента на слова,
@@ -878,7 +927,8 @@ class CVEDatabase:
         ver = version.lower() if version else ""
 
         base = """
-            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4, c.cwe_id
+            SELECT DISTINCT c.cve_id, c.cvss_v2, c.cvss_v3, c.cvss_v4,
+                            c.cwe_id, c.description, c.published
             FROM cve_entries c
             JOIN cve_cpe_map m ON c.cve_id = m.cve_id
             JOIN cpe_entries p ON m.cpe_id = p.id
@@ -888,7 +938,10 @@ class CVEDatabase:
             cursor.execute(base + where + " LIMIT 500", params)
             return [{"cve_id": r["cve_id"], "cvss_v2": r["cvss_v2"],
                      "cvss_v3": r["cvss_v3"], "cvss_v4": r["cvss_v4"],
-                     "cwe_id": r["cwe_id"] or ""} for r in cursor.fetchall()]
+                     "cwe_id": r["cwe_id"] or "",
+                     "description": r["description"] or "",
+                     "published": r["published"] or ""}
+                    for r in cursor.fetchall()]
 
         all_results = []
         seen = set()

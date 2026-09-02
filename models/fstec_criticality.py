@@ -17,6 +17,7 @@
 - V < 2.0  → Низкий (зелёный)
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 
@@ -72,12 +73,54 @@ EXPLOITATION_E: Dict[str, float] = {
 }
 
 # H — последствия эксплуатации, вес h = 1.0
+#
+# Все двенадцать значений таблицы 1 Методики. Раньше здесь были только
+# первые четыре, а остальные последствия давали H = 0 и обнуляли критичность.
+# Тяжелее всего это било по отказу в обслуживании — самому частому
+# последствию в БДУ (24 659 записей) — и по раскрытию информации (CWE-200),
+# по которому на эталонной схеме выбирается цель первого этапа ККА.
 CONSEQUENCES_H: Dict[str, float] = {
-    "code_execution":       0.5,    # Выполнение произвольного кода
-    "privilege_escalation": 0.5,    # Повышение привилегий
-    "security_bypass":      0.4,    # Обход средств защиты
+    "code_execution":       0.50,   # Выполнение произвольного кода
+    "privilege_escalation": 0.50,   # Повышение привилегий
+    "security_bypass":      0.40,   # Обход механизмов безопасности
     "code_injection":       0.34,   # Внедрение кода
+    "obtain_info":          0.30,   # Получение конфиденциальной информации
+    "loss_of_integrity":    0.30,   # Нарушение целостности данных
+    "dos":                  0.26,   # Отказ в обслуживании
+    "overwrite_files":      0.22,   # Перезапись произвольных файлов
+    "write_local_files":    0.20,   # Запись локальных файлов
+    "read_local_files":     0.18,   # Чтение локальных файлов
+    "spoof_ui":             0.12,   # Поддельный пользовательский интерфейс
+    "xss":                  0.10,   # Межсайтовый скриптинг
 }
+
+# Русские названия последствий — для отображения в паспорте и подсказках
+CONSEQUENCE_NAMES: Dict[str, str] = {
+    "code_execution":       "Выполнение произвольного кода",
+    "privilege_escalation": "Повышение привилегий",
+    "security_bypass":      "Обход механизмов безопасности",
+    "code_injection":       "Внедрение кода",
+    "obtain_info":          "Получение конфиденциальной информации",
+    "loss_of_integrity":    "Нарушение целостности данных",
+    "dos":                  "Отказ в обслуживании",
+    "overwrite_files":      "Перезапись произвольных файлов",
+    "write_local_files":    "Запись локальных файлов",
+    "read_local_files":     "Чтение локальных файлов",
+    "spoof_ui":             "Поддельный пользовательский интерфейс",
+    "xss":                  "Межсайтовый скриптинг",
+    "undetermined":         "Последствие не определено",
+}
+
+# Значение H, когда последствие определить не удалось — ни по описанию БДУ,
+# ни по классу слабости. В таблице 1 такой строки нет: это медиана
+# двенадцати значений, применяемая, чтобы неизвестное последствие
+# не обнуляло критичность и не завышало её.
+H_UNDETERMINED = 0.30
+
+# Порядок убывания веса — для правила «берётся наибольшее из значений»
+# (пункты 15, 16 и 17 Методики)
+CONSEQUENCE_PRIORITY: List[str] = sorted(
+    CONSEQUENCES_H, key=lambda k: CONSEQUENCES_H[k], reverse=True)
 
 # CWE-категории, определяющие тип последствий
 # (упрощённый маппинг наиболее распространённых CWE)
@@ -112,14 +155,145 @@ CWE_TO_CONSEQUENCE: Dict[str, str] = {
     "CWE-522": "security_bypass",    # Недостаточная защита credentials
     # Внедрение кода
     "CWE-78":  "code_injection",     # Инъекция команд ОС
-    "CWE-79":  "code_injection",     # XSS
     "CWE-89":  "code_injection",     # SQL-инъекция
     "CWE-94":  "code_injection",     # Инъекция кода
     "CWE-77":  "code_injection",     # Инъекция команд
     "CWE-502": "code_injection",     # Десериализация
     "CWE-917": "code_injection",     # Expression Language Injection
     "CWE-611": "code_injection",     # XXE
+    # Межсайтовый скриптинг — отдельная строка таблицы 1 (0,10).
+    # Раньше CWE-79 относился к внедрению кода (0,34) — завышение в 3,4 раза
+    "CWE-79":  "xss",
+    "CWE-80":  "xss",
+    "CWE-83":  "xss",
+    # Получение конфиденциальной информации
+    "CWE-200": "obtain_info",        # Раскрытие информации
+    "CWE-209": "obtain_info",        # Информация в сообщении об ошибке
+    "CWE-359": "obtain_info",        # Раскрытие персональных данных
+    "CWE-532": "obtain_info",        # Информация в журналах
+    "CWE-538": "obtain_info",        # Информация в файлах и каталогах
+    # Нарушение целостности данных
+    "CWE-345": "loss_of_integrity",  # Недостаточная проверка подлинности данных
+    "CWE-347": "loss_of_integrity",  # Неверная проверка подписи
+    "CWE-494": "loss_of_integrity",  # Загрузка кода без проверки целостности
+    "CWE-565": "loss_of_integrity",  # Доверие непроверенным cookie
+    # Отказ в обслуживании — самое частое последствие в БДУ
+    "CWE-400": "dos",                # Неконтролируемое потребление ресурсов
+    "CWE-404": "dos",                # Некорректное освобождение ресурса
+    "CWE-770": "dos",                # Выделение ресурсов без ограничений
+    "CWE-835": "dos",                # Бесконечный цикл
+    "CWE-834": "dos",                # Избыточные итерации
+    "CWE-401": "dos",                # Утечка памяти
+    # Перезапись произвольных файлов
+    "CWE-59":  "overwrite_files",    # Переход по символьной ссылке
+    "CWE-73":  "overwrite_files",    # Внешнее управление именем файла
+    # Запись и чтение локальных файлов
+    "CWE-22":  "read_local_files",   # Выход за пределы каталога
+    "CWE-23":  "read_local_files",   # Относительный обход каталога
+    "CWE-98":  "write_local_files",  # Подключение внешнего файла
+    "CWE-434": "write_local_files",  # Загрузка файла опасного типа
+    # Поддельный пользовательский интерфейс
+    "CWE-451": "spoof_ui",           # Искажение критичной информации в UI
+    "CWE-601": "spoof_ui",           # Открытое перенаправление
+    "CWE-1021": "spoof_ui",          # Некорректное ограничение отрисовки
 }
+
+
+# ============================================================================
+# Распознавание последствий по описанию из БДУ ФСТЭК
+# ============================================================================
+
+# БДУ формулирует последствие прямо в описании: «Эксплуатация уязвимости
+# может позволить нарушителю выполнить произвольный код», «повысить свои
+# привилегии», «вызвать отказ в обслуживании». Это надёжнее вывода по CWE:
+# один и тот же класс слабости приводит к разным последствиям в зависимости
+# от того, где он находится.
+#
+# Порядок важен: проверка идёт сверху вниз, от тяжёлых последствий к лёгким,
+# как того требует правило «наибольшего из значений» (п. 17 Методики).
+CONSEQUENCE_PATTERNS: List[Tuple[str, str]] = [
+    # Выполнение произвольного кода (0,50)
+    ("code_execution",       r"выполн\w*\s+(?:\w+\s+){0,3}?произвольн\w*\s+"
+                             r"(?:код|команд|программ|скрипт|запрос)"),
+    ("code_execution",       r"выполнение\s+произвольного\s+кода"),
+    ("code_execution",       r"удал[её]нн\w*\s+выполнени\w*\s+кода"),
+    ("code_execution",       r"получить\s+(?:\w+\s+){0,2}?контроль\s+над"),
+    # Повышение привилегий (0,50)
+    ("privilege_escalation", r"повы\w*\s+(?:свои\s+)?привилегии|повышение\s+привилегий"),
+    ("privilege_escalation", r"эскалаци\w*\s+привилегий"),
+    ("privilege_escalation", r"получить\s+(?:\w+\s+){0,3}?прав\w*\s+"
+                             r"(?:администратор|суперпользовател|root|доступа)"),
+    ("privilege_escalation", r"получить\s+(?:\w+\s+){0,2}?полн\w*\s+доступ"),
+    # Обход механизмов безопасности (0,40)
+    ("security_bypass",      r"обойти\s+(?:\w+\s+){0,3}?(?:ограничени|защит|аутентификаци|"
+                             r"авторизаци|механизм|политик|песочниц|проверк)"),
+    ("security_bypass",      r"обход\s+(?:\w+\s+){0,3}?(?:ограничени|защит|аутентификаци|"
+                             r"авторизаци|механизм)"),
+    ("security_bypass",      r"получить\s+несанкционированн\w*\s+доступ"),
+    ("security_bypass",      r"получить\s+(?:авторизованн\w*|привилегированн\w*)\s+доступ"),
+    # Внедрение кода (0,34)
+    ("code_injection",       r"внедри\w*\s+(?:\w+\s+){0,2}?код|внедрение\s+(?:\w+\s+){0,2}?кода"),
+    ("code_injection",       r"инъекци\w*\s+(?:sql|команд|кода)"),
+    # Получение конфиденциальной информации (0,30)
+    ("obtain_info",          r"раскры\w*\s+(?:\w+\s+){0,3}?(?:информаци|данн|сведени)"),
+    ("obtain_info",          r"получить\s+(?:\w+\s+){0,3}?(?:конфиденциальн|защищаем|"
+                             r"чувствительн|персональн)"),
+    ("obtain_info",          r"нарушить\s+конфиденциальност|нарушение\s+конфиденциальност"),
+    ("obtain_info",          r"утечк\w*\s+(?:\w+\s+){0,2}?(?:информаци|данн)"),
+    # Нарушение целостности данных (0,30)
+    ("loss_of_integrity",    r"нарушить\s+целостност|нарушение\s+целостност"),
+    ("loss_of_integrity",    r"модифицировать\s+(?:\w+\s+){0,3}?(?:данные|информаци|содержимое)"),
+    # Отказ в обслуживании (0,26)
+    ("dos",                  r"отказ\w*\s+в\s+обслуживании"),
+    ("dos",                  r"нарушить\s+доступност|нарушение\s+доступности"),
+    ("dos",                  r"аварийн\w*\s+завершени|вызвать\s+сбой"),
+    # Перезапись произвольных файлов (0,22)
+    ("overwrite_files",      r"перезапис\w*\s+(?:\w+\s+){0,3}?файл"),
+    # Запись локальных файлов (0,20)
+    ("write_local_files",    r"запис\w*\s+(?:\w+\s+){0,3}?(?:локальн\w*\s+)?файл"),
+    ("write_local_files",    r"загрузить\s+(?:\w+\s+){0,3}?файл"),
+    # Чтение локальных файлов (0,18)
+    ("read_local_files",     r"(?:прочитать|читать)\s+(?:\w+\s+){0,3}?файл"),
+    ("read_local_files",     r"чтени\w*\s+(?:\w+\s+){0,2}?(?:локальн\w*\s+)?файл"),
+    # Поддельный пользовательский интерфейс (0,12)
+    ("spoof_ui",             r"подделать\s+(?:\w+\s+){0,3}?интерфейс|подмен\w*\s+"
+                             r"(?:\w+\s+){0,2}?интерфейс"),
+    ("spoof_ui",             r"перенаправ\w*\s+(?:\w+\s+){0,3}?пользовател"),
+    # Межсайтовый скриптинг (0,10) — «межсайтовые атаки», «межсайтовый скриптинг»
+    ("xss",                  r"межсайтов\w*"),
+]
+
+# Скомпилированные шаблоны — собираются при первом обращении
+_CONSEQUENCE_RE: List[Tuple[str, "re.Pattern"]] = []
+
+
+def consequence_from_description(description: str) -> Optional[str]:
+    """Определяет тип последствий по русскому описанию уязвимости из БДУ.
+
+    Args:
+        description: Поле description записи БДУ
+
+    Returns:
+        Ключ из CONSEQUENCES_H или None, если последствие не распознано.
+        Если описание содержит несколько последствий, возвращается
+        наиболее тяжёлое — как требует пункт 17 Методики.
+    """
+    if not description:
+        return None
+
+    if not _CONSEQUENCE_RE:
+        for key, pattern in CONSEQUENCE_PATTERNS:
+            _CONSEQUENCE_RE.append((key, re.compile(pattern, re.IGNORECASE)))
+
+    text = description.lower()
+    found = {key for key, rx in _CONSEQUENCE_RE if rx.search(text)}
+    if not found:
+        return None
+
+    for key in CONSEQUENCE_PRIORITY:
+        if key in found:
+            return key
+    return None
 
 
 # ============================================================================
@@ -169,10 +343,15 @@ class FSTECAssessment:
     H: float = 0.0                     # Значение H
     I_imp: float = 0.0                 # h×H
 
+    # Данные БДУ ФСТЭК
+    bdu_id: str = ""                   # Идентификатор вида «BDU:2021-05516»
+    exploit_status: str = ""           # Наличие эксплойта по данным БДУ
+
     # Итог
     V: float = 0.0                     # Итоговая оценка критичности
     level: str = "Низкий"              # Уровень: Критический/Высокий/Средний/Низкий
     color: str = "#38A169"             # Цвет уровня (hex)
+    deadline: str = ""                 # Рекомендуемый срок устранения (п. 21)
 
     def calculate(self) -> "FSTECAssessment":
         """Вычисляет V по формуле ФСТЭК и определяет уровень критичности.
@@ -204,9 +383,10 @@ class FSTECAssessment:
         self.I_at = round(self.I_at, 4)
         self.I_imp = round(self.I_imp, 4)
 
-        # Определяем уровень и цвет
+        # Определяем уровень, цвет и срок устранения
         self.level = get_criticality_level(self.V)
         self.color = get_criticality_color(self.V)
+        self.deadline = get_remediation_deadline(self.V)
 
         return self
 
@@ -229,9 +409,12 @@ class FSTECAssessment:
             "h_category": self.h_category,
             "H": self.H,
             "I_imp": self.I_imp,
+            "bdu_id": self.bdu_id,
+            "exploit_status": self.exploit_status,
             "V": self.V,
             "level": self.level,
             "color": self.color,
+            "deadline": self.deadline,
         }
 
     @classmethod
@@ -254,9 +437,12 @@ class FSTECAssessment:
             h_category=data.get("h_category", ""),
             H=data.get("H", 0.0),
             I_imp=data.get("I_imp", 0.0),
+            bdu_id=data.get("bdu_id", ""),
+            exploit_status=data.get("exploit_status", ""),
             V=data.get("V", 0.0),
             level=data.get("level", "Низкий"),
             color=data.get("color", "#38A169"),
+            deadline=data.get("deadline", ""),
         )
 
 
@@ -281,6 +467,31 @@ def get_criticality_level(v: float) -> str:
         return "Средний"
     else:
         return "Низкий"
+
+
+# Рекомендуемые сроки устранения (пункт 21 Методики)
+REMEDIATION_DEADLINES: Dict[str, str] = {
+    "Критический": "до 24 часов",
+    "Высокий":     "до 7 дней",
+    "Средний":     "до 4 недель",
+    "Низкий":      "до 4 месяцев",
+}
+
+
+def get_remediation_deadline(v: float) -> str:
+    """Возвращает рекомендуемый срок устранения уязвимости.
+
+    Пункт 21 Методики связывает срок с уровнем критичности: критический —
+    несколько часов, высокий — несколько дней, средний — несколько недель,
+    низкий — несколько месяцев.
+
+    Args:
+        v: Итоговая оценка критичности
+
+    Returns:
+        Строка вида «до 7 дней»
+    """
+    return REMEDIATION_DEADLINES.get(get_criticality_level(v), "")
 
 
 def get_criticality_color(v: float) -> str:
@@ -340,21 +551,33 @@ def _determine_K(node_type: str) -> Tuple[str, float]:
     return category, K
 
 
-def _determine_E(cve_list: List[Dict]) -> Tuple[str, float]:
-    """Определяет показатель эксплуатируемости E по списку CVE.
+def _determine_E(cve_list: List[Dict],
+                 bdu_records: Optional[Dict[str, Dict]] = None) -> Tuple[str, float]:
+    """Определяет показатель эксплуатируемости E (таблица 1 Методики).
 
-    Эвристика:
-    - Если CVSS ≥ 9.0, считаем что эксплойт вероятно существует
-      (критические уязвимости часто имеют публичные эксплойты)
-    - Если CVSS ≥ 7.0, эксплойт может существовать
-    - Иначе — эксплойт не известен
+    Источник — поле наличия эксплойта из БДУ ФСТЭК, которое использует те же
+    формулировки, что и примеры Методики:
 
-    Примечание: для точного определения нужны данные из CISA KEV или
-    Exploit-DB, которые пока не интегрированы. Используется
-    приблизительная оценка на основе CVSS.
+        «Существует в открытом доступе» → E = 0,3
+        «Существует»                    → E = 0,3
+        «Данные уточняются»             → E = 0,1
+
+    Пункт 16 Методики: если показатель может принимать несколько значений,
+    итоговой оценке присваивается наибольшее из них — поэтому по всем CVE
+    компонента берётся максимум.
+
+    Раньше E угадывался по CVSS («если ≥ 7,0, эксплойт наверное есть»).
+    Сверка с БДУ на 55 752 сопоставленных CVE показала, что такая догадка
+    ошибается в 47,6 % случаев, причём в обе стороны.
+
+    Значение E = 0,6 («эксплуатируется в реальных атаках») из текущего
+    среза БДУ получить нельзя: соответствующее поле не попало в импорт.
+    До его появления оценка консервативна — это занижение, а не завышение.
 
     Args:
         cve_list: Список словарей CVE
+        bdu_records: Записи БДУ по идентификатору CVE (BDUDatabase.get_many_by_cve).
+            Если не переданы, используется запасная оценка по CVSS.
 
     Returns:
         Кортеж (категория, значение E)
@@ -362,75 +585,90 @@ def _determine_E(cve_list: List[Dict]) -> Tuple[str, float]:
     if not cve_list:
         return "no_exploit", EXPLOITATION_E["no_exploit"]
 
+    if bdu_records:
+        for cve in cve_list:
+            record = bdu_records.get(cve.get("cve_id", ""))
+            if not record:
+                continue
+            status = (record.get("exploit_status") or "").lower()
+            if "существует" in status:
+                # Максимум из доступных значений достигнут — дальше не ищем
+                return "exploit_exists", EXPLOITATION_E["exploit_exists"]
+        # Записи БДУ есть, но ни в одной эксплойт не заявлен
+        if any(cve.get("cve_id", "") in bdu_records for cve in cve_list):
+            return "no_exploit", EXPLOITATION_E["no_exploit"]
+
+    # Запасной путь: для уязвимости нет записи в БДУ. Высокая базовая оценка
+    # косвенно указывает на вероятное наличие средств эксплуатации.
     max_cvss = max(_get_best_cvss(cve) for cve in cve_list)
-
-    # Эвристика на основе CVSS-оценки
-    if max_cvss >= 9.0:
+    if max_cvss >= 7.0:
         return "exploit_exists", EXPLOITATION_E["exploit_exists"]
-    elif max_cvss >= 7.0:
-        return "exploit_exists", EXPLOITATION_E["exploit_exists"]
-    else:
-        return "no_exploit", EXPLOITATION_E["no_exploit"]
+    return "no_exploit", EXPLOITATION_E["no_exploit"]
 
 
-def _determine_H(cve_list: List[Dict]) -> Tuple[str, float]:
-    """Определяет показатель последствий H по CWE-классам из CVE.
+def _determine_H(cve_list: List[Dict],
+                 bdu_records: Optional[Dict[str, Dict]] = None) -> Tuple[str, float]:
+    """Определяет показатель последствий H (таблица 1 Методики).
 
-    Анализирует CWE-идентификаторы всех CVE и выбирает наиболее
-    опасный тип последствий. Приоритет:
-    1. Выполнение произвольного кода (H=0.5)
-    2. Повышение привилегий (H=0.5)
-    3. Обход средств защиты (H=0.4)
-    4. Внедрение кода (H=0.34)
+    Два источника, в порядке убывания надёжности:
+
+    1. Русское описание из БДУ ФСТЭК. Оно прямо называет последствие:
+       «позволить нарушителю выполнить произвольный код», «повысить свои
+       привилегии», «вызвать отказ в обслуживании». Распознаётся в 86,7 %
+       описаний БДУ.
+    2. Класс слабости CWE. Менее точен: один и тот же CWE приводит
+       к разным последствиям в зависимости от того, где он находится.
+
+    Пункт 17 Методики: если показатель принимает несколько значений,
+    итоговой оценке присваивается наибольшее — поэтому среди всех
+    найденных последствий выбирается самое тяжёлое.
 
     Args:
         cve_list: Список словарей CVE (с полем cwe_id)
+        bdu_records: Записи БДУ по идентификатору CVE
 
     Returns:
-        Кортеж (категория, значение H). Если CWE не определён —
-        возвращает ("code_injection", 0.34) как безопасное значение по умолчанию.
+        Кортеж (категория, значение H). Категория «undetermined» означает,
+        что последствие определить не удалось.
     """
     if not cve_list:
         return "", 0.0
 
-    # Приоритет последствий (от наиболее к наименее критичным)
-    consequence_priority = [
-        "code_execution",
-        "privilege_escalation",
-        "security_bypass",
-        "code_injection",
-    ]
-
-    found_consequences = set()
+    found: set = set()
 
     for cve in cve_list:
+        cve_id = cve.get("cve_id", "")
+
+        # --- Источник 1: описание из БДУ ---
+        if bdu_records:
+            record = bdu_records.get(cve_id)
+            if record:
+                consequence = consequence_from_description(record.get("description", ""))
+                if consequence:
+                    found.add(consequence)
+                    continue  # Описание надёжнее CWE — к нему не обращаемся
+
+        # --- Источник 2: класс слабости CWE ---
         cwe_raw = cve.get("cwe_id", "")
         if not cwe_raw:
             continue
-
-        # cwe_id может содержать несколько через запятую: "CWE-79, CWE-89"
+        # cwe_id может содержать несколько через запятую: «CWE-79, CWE-89»
         for cwe_part in cwe_raw.replace(" ", "").split(","):
             cwe_part = cwe_part.strip()
             if not cwe_part:
                 continue
-            # Нормализуем формат: "119" → "CWE-119"
             if not cwe_part.startswith("CWE-"):
-                cwe_part = f"CWE-{cwe_part}"
+                cwe_part = f"CWE-{cwe_part}"  # Нормализуем «119» → «CWE-119»
             consequence = CWE_TO_CONSEQUENCE.get(cwe_part)
             if consequence:
-                found_consequences.add(consequence)
+                found.add(consequence)
 
-    # Выбираем наиболее критичное последствие
-    for cons in consequence_priority:
-        if cons in found_consequences:
-            return cons, CONSEQUENCES_H[cons]
+    # Правило наибольшего значения (п. 17 Методики)
+    for consequence in CONSEQUENCE_PRIORITY:
+        if consequence in found:
+            return consequence, CONSEQUENCES_H[consequence]
 
-    # Если CWE не маппится — базовое значение (инъекция кода)
-    # Наличие CVE подразумевает наличие какого-то воздействия
-    if cve_list:
-        return "code_injection", CONSEQUENCES_H["code_injection"]
-
-    return "", 0.0
+    return "undetermined", H_UNDETERMINED
 
 
 # ============================================================================
@@ -442,6 +680,7 @@ def assess_component(
     cve_list: List[Dict],
     is_internet_facing: bool,
     vulnerable_percent: Optional[float] = None,
+    bdu_records: Optional[Dict[str, Dict]] = None,
 ) -> FSTECAssessment:
     """Выполняет оценку критичности уязвимостей узла по методике ФСТЭК.
 
@@ -499,11 +738,18 @@ def assess_component(
     # --- P: доступность с периметра ---
     assessment.P = PERIMETER_P[is_internet_facing]
 
-    # --- E: эксплуатируемость ---
-    assessment.e_category, assessment.E = _determine_E(cve_list)
+    # --- E: эксплуатируемость (по данным БДУ ФСТЭК) ---
+    assessment.e_category, assessment.E = _determine_E(cve_list, bdu_records)
 
-    # --- H: последствия ---
-    assessment.h_category, assessment.H = _determine_H(cve_list)
+    # --- H: последствия (по описанию БДУ, при неудаче — по CWE) ---
+    assessment.h_category, assessment.H = _determine_H(cve_list, bdu_records)
+
+    # --- Идентификатор БДУ для отображения рядом с CVE ---
+    if bdu_records:
+        record = bdu_records.get(assessment.cve_id)
+        if record:
+            assessment.bdu_id = record.get("bdu_id", "")
+            assessment.exploit_status = record.get("exploit_status", "")
 
     # --- Вычисление V ---
     assessment.calculate()

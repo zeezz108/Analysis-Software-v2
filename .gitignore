@@ -8,8 +8,9 @@ dist/
 build/
 .DS_Store
 Thumbs.db
-database/cve_database_v2.db-shm
-database/cve_database_v2.db-wal
+# Временные файлы SQLite (WAL) — создаются при работе, в репозиторий не нужны
+*.db-shm
+*.db-wal
 database/cve_db_v1_backup.py
 
 # Локальные конфиги и рабочие материалы — не для репозитория

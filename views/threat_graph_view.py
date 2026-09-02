@@ -90,6 +90,9 @@ class ThreatGraphView:
 
         self.graph = ThreatGraphBuilder(node).build()
 
+        # Роли ЦО/ТрО — структурное свойство графа, считается один раз
+        self._roles = self.graph.roles()
+
         # Только реально используемые уровни — без принудительного показа пустых
         self._used = list(self.graph.get_used_levels())
 
@@ -210,8 +213,9 @@ class ThreatGraphView:
         ctk.CTkLabel(lg, text="Объекты:", font=("Segoe UI", 11, "bold")).pack(
             side=tk.LEFT, padx=(sp(8), sp(4)))
         for t, c_, desc in [
-            ("ЦО", "#EF4444", "Целевой объект — есть CVE"),
-            ("ТрО", "#6B7280", "Транзитный объект — CVE не обнаружены"),
+            ("ЦО, ТрО", "#B45309", "И цель воздействия, и транзит дальше"),
+            ("ЦО", "#EF4444", "Целевой объект — тупик, дальше не пройти"),
+            ("ТрО", "#3B82F6", "Транзитный объект — точка входа УБИ"),
         ]:
             ctk.CTkFrame(lg, width=sp(10), height=sp(10),
                          corner_radius=sp(5), fg_color=c_).pack(side=tk.LEFT, padx=(sp(10), sp(2)))
@@ -500,28 +504,20 @@ class ThreatGraphView:
             lc = LEVEL_COLORS.get(v.level, "#888")
             fl = "#FFF" if mode == "light" else self._dk(lc, 0.7)
 
-            # ── Определяем роль узла: ЦО или ТрО ──────────────────────────
-            # Точки входа (ω) — всегда транзитный объект (физический порт)
-            # После «Оценить критичность»: CVE найдены → ЦО, иначе → ТрО
-            # До оценки: ЦО по умолчанию (все компоненты — потенциальные цели)
-            is_entry = v.level == GraphLevel.ENTRY_POINT
-            if is_entry:
-                role = "ТрО"
-                role_color = "#3B82F6"   # синий
-                dash_style = (5, 3)      # пунктирная линия как на плакате
-            elif self._assessments:
-                assess = self._assessments.get(v.id)
-                if assess and assess.V > 0:
-                    role = "ЦО"
-                    role_color = "#EF4444"   # красный — есть уязвимости
-                    dash_style = ()
-                else:
-                    role = "ТрО"
-                    role_color = "#6B7280"   # серый — CVE не найдены
-                    dash_style = (5, 3)
-            else:
-                role = "ЦО"
-                role_color = "#EF4444"
+            # ── Роль вершины: ЦО, ТрО или «ЦО, ТрО» ──────────────────────
+            # Структурное свойство графа, а не следствие найденных CVE:
+            # ТрО — есть исходящие рёбра, ЦО — вершина не точка входа.
+            # Расчёт в ThreatGraph.roles(), правило взято с эталонного
+            # графа узла и легенды плаката.
+            role = self._roles.get(v.id, "ЦО")
+            if role == "ТрО":
+                role_color = "#3B82F6"   # синий — только транзит
+                dash_style = (5, 3)      # пунктирный кружок, как на плакате
+            elif role == "ЦО":
+                role_color = "#EF4444"   # красный — только цель, тупик
+                dash_style = ()
+            else:                        # «ЦО, ТрО»
+                role_color = "#B45309"   # янтарный — и цель, и транзит
                 dash_style = ()
 
             # Раскраска заливки по ФСТЭК-оценке
@@ -948,7 +944,11 @@ class ThreatGraphView:
             try:
                 from database.cve_db import CVEDatabase
                 from utils.cpe_utils import extract_cpe_components, get_protocol_cpe
+                from utils.level_filter import filter_cves_by_level
+                from models.threat_graph import GRAPH_LEVEL_CODES
+                from database.bdu_db import BDUDatabase
                 db = CVEDatabase()
+                bdu = BDUDatabase()
 
                 # Определяем доступность из интернета
                 is_internet = self.node.type in ("Router", "Internet") or any(
@@ -984,9 +984,28 @@ class ThreatGraphView:
                     if not cves:
                         continue
 
-                    # Расчёт V по ФСТЭК
+                    # Отбор по уровню: выборка по CPE относится к продукту
+                    # целиком, поэтому без фильтра критичность вершины
+                    # считалась бы по чужим уязвимостям
+                    cves = filter_cves_by_level(
+                        cves,
+                        level_code=GRAPH_LEVEL_CODES.get(v.level, "q"),
+                        component_name=v.component_name or v.label,
+                        limit=10,
+                    )
+                    if not cves:
+                        continue
+
+                    # Данные БДУ ФСТЭК: наличие эксплойта даёт показатель E,
+                    # русское описание — показатель H. Без них оба
+                    # приходится угадывать (см. models/fstec_criticality.py)
+                    bdu_records = bdu.get_many_by_cve(
+                        [c.get("cve_id", "") for c in cves]) if bdu.available else {}
+
+                    # Расчёт V по методике ФСТЭК от 30.06.2025
                     assessment = assess_component(
-                        self.node.type, cves, is_internet)
+                        self.node.type, cves, is_internet,
+                        bdu_records=bdu_records)
                     self._assessments[v.id] = assessment
 
                 q.put(("done",))

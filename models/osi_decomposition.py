@@ -55,6 +55,68 @@ LEVEL_NAMES = {
     OSILevel.USER:         "Пользовательский уровень",
 }
 
+# Буквенные коды уровней модели УБИ — те же, что в идентификаторах паспорта
+# (f1.1.1, z4, l2, t1.1, d5, r7, q2, а12.m, i1.1, w1, p1.2, v1, h3).
+# Используются для подбора профиля фильтрации CVE (utils/level_filter.py).
+LEVEL_CODES = {
+    OSILevel.PHYSICAL:     "f",
+    OSILevel.DATA_LINK:    "z",
+    OSILevel.NETWORK:      "l",
+    OSILevel.TRANSPORT:    "t",
+    OSILevel.SESSION:      "d",
+    OSILevel.PRESENTATION: "r",
+    OSILevel.APPLICATION:  "q",
+    OSILevel.HARDWARE:     "a",
+    OSILevel.USER:         "h",
+    # KERNEL разделяется на четыре подсистемы — см. level_code_for()
+}
+
+# Подсистемы ядра ОС различаются по названию: у них разные профили уязвимостей.
+# Дефект в драйвере и дефект в модели разграничения доступа лежат на разных
+# уровнях модели УБИ, хотя оба находятся в ядре.
+_KERNEL_SUBSYSTEM_CODES = (
+    ("драйвер",       "i"),   # Подсистема драйверов устройств
+    ("доступ",        "w"),   # Подсистема управления доступом
+    ("разграничен",   "w"),
+    ("файл",          "p"),   # Подсистема управления файлами
+    ("процесс",       "v"),   # Подсистема управления процессами
+    ("озу",           "v"),
+)
+
+# Названия файловых систем попадают на уровень KERNEL как software
+_FILESYSTEM_NAMES = {"ntfs", "fat32", "fat", "ext4", "ext3", "xfs", "btrfs", "zfs", "f2fs"}
+
+
+def level_code_for(component: "OSIComponent") -> str:
+    """Возвращает буквенный код уровня модели УБИ для компонента.
+
+    Нужен, чтобы подобрать профиль фильтрации CVE: уязвимость относится
+    к тому уровню, на котором лежит её обработчик. Для большинства уровней
+    код определяется однозначно, а ядро ОС делится на четыре подсистемы,
+    которые различаются по названию компонента.
+
+    Args:
+        component: Компонент разложения узла
+
+    Returns:
+        Код уровня: f, z, l, t, d, r, q, a, i, w, p, v или h
+    """
+    code = LEVEL_CODES.get(component.level)
+    if code:
+        return code
+
+    if component.level is not OSILevel.KERNEL:
+        return "q"  # Разумный запасной вариант для незнакомого уровня
+
+    name = component.name.lower()
+    if name in _FILESYSTEM_NAMES:
+        return "p"
+    for marker, subsystem_code in _KERNEL_SUBSYSTEM_CODES:
+        if marker in name:
+            return subsystem_code
+    return "i"  # Прочее в ядре относим к подсистеме драйверов
+
+
 LEVEL_DESCRIPTIONS = {
     OSILevel.PHYSICAL:     "Передача битов через физическую среду",
     OSILevel.DATA_LINK:    "Передача фреймов, MAC-адресация",

@@ -274,3 +274,92 @@ class ComponentCatalog:
                     "version": r["version"] or "", "cpe_uri": ""}
 
         return None
+
+    # ------------------------------------------------------------------
+    # Реестры отечественного ПО и оборудования
+    # ------------------------------------------------------------------
+
+    # Человекочитаемые названия реестров
+    REGISTRY_NAMES = {
+        "mintsifry": "Реестр ПО Минцифры",
+        "gisp":      "Реестр ГИСП",
+        "manual":    "Добавлено вручную",
+    }
+
+    def lookup_registry(self, title: str = "", vendor: str = "",
+                        product: str = "") -> Optional[Dict]:
+        """Проверяет, входит ли компонент в реестры отечественного ПО.
+
+        Пункт 23 Методики оценки критичности отдельно выделяет уязвимости
+        «в зарубежных программных, программно-аппаратных средствах или
+        программном обеспечении с открытым исходным кодом» — решение об
+        обновлении для них принимается иначе. Чтобы это различать, паспорт
+        показывает, зарегистрирован ли компонент в реестре Минцифры или ГИСП.
+
+        Поиск идёт от точного к широкому: по названию, затем по паре
+        вендор+продукт, затем по одному продукту.
+
+        Args:
+            title: Отображаемое название компонента
+            vendor: Вендор из CPE
+            product: Продукт из CPE
+
+        Returns:
+            Словарь с ключами registry, registry_name, registry_id, title
+            или None, если компонент в реестрах не найден (то есть зарубежный)
+        """
+        if not self._connection:
+            return None
+
+        cursor = self._connection.cursor()
+
+        def _fetch(where: str, params: list) -> Optional[Dict]:
+            cursor.execute(
+                "SELECT title, vendor, product, registry, registry_id, category "
+                "FROM russian_components WHERE " + where + " LIMIT 1", params)
+            row = cursor.fetchone()
+            if not row:
+                return None
+            registry = row["registry"] or ""
+            return {
+                "registry": registry,
+                "registry_name": self.REGISTRY_NAMES.get(registry, registry),
+                "registry_id": row["registry_id"] or "",
+                "title": row["title"] or "",
+                "category": row["category"] or "",
+            }
+
+        clean_title = (title or "").strip()
+        if clean_title:
+            found = _fetch("LOWER(TRIM(title)) = LOWER(?)", [clean_title])
+            if found:
+                return found
+
+        v = (vendor or "").strip().lower()
+        p = (product or "").strip().lower()
+        if v and p:
+            found = _fetch("LOWER(vendor) = ? AND LOWER(product) = ?", [v, p])
+            if found:
+                return found
+        if p:
+            found = _fetch("LOWER(product) = ?", [p])
+            if found:
+                return found
+
+        return None
+
+    def registry_label(self, title: str = "", vendor: str = "",
+                       product: str = "") -> str:
+        """Короткая подпись для колонки «Реестр» в паспорте.
+
+        Returns:
+            «Минцифры №12345», «ГИСП» или «зарубежный»
+        """
+        found = self.lookup_registry(title, vendor, product)
+        if not found:
+            return "зарубежный"
+        short = {"mintsifry": "Минцифры", "gisp": "ГИСП"}.get(
+            found["registry"], found["registry_name"])
+        if found["registry_id"]:
+            return f"{short} №{found['registry_id']}"
+        return short

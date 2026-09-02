@@ -42,6 +42,21 @@ class SecurityPassportDialog:
         except Exception:
             self.capec_db = None
 
+        # Банк данных угроз ФСТЭК: русское описание уязвимости, наличие
+        # эксплойта и идентификатор БДУ рядом с CVE
+        try:
+            from database.bdu_db import BDUDatabase
+            self.bdu_db = BDUDatabase()
+        except Exception:
+            self.bdu_db = None
+
+        # Каталог компонентов: проверка вхождения в реестры Минцифры и ГИСП
+        try:
+            from database.catalog_db import ComponentCatalog
+            self.catalog = ComponentCatalog()
+        except Exception:
+            self.catalog = None
+
         self.dialog = ctk.CTkToplevel(parent)
         self.dialog.title(f"Паспорт безопасности: {node.name}")
         self.dialog.geometry("1600x1020")
@@ -185,6 +200,21 @@ class SecurityPassportDialog:
 
         return components
 
+    # Версия формата кеша CVE в properties узла.
+    # 2 — записи содержат description и published: без них не работает отбор
+    # по уровню модели УБИ (utils/level_filter.py). Кеши версии 1, сохранённые
+    # в схемах до этого изменения, пересобираются при первом открытии паспорта.
+    CACHE_VERSION = 2
+
+    def _cache_root(self) -> Dict[str, Any]:
+        """Возвращает корень кеша CVE, пересоздавая его при смене формата."""
+        cache_root = self.node.properties.get("security_passport_cache")
+        if (not isinstance(cache_root, dict)
+                or cache_root.get("version") != self.CACHE_VERSION):
+            cache_root = {"components": {}, "version": self.CACHE_VERSION}
+            self.node.properties["security_passport_cache"] = cache_root
+        return cache_root
+
     def get_all_cves_for_component(self, component_name: str) -> List[Dict]:
         """Возвращает все CVE для компонента (с кешированием в properties узла).
 
@@ -196,10 +226,7 @@ class SecurityPassportDialog:
         if not component_name or component_name == "—":
             return []
 
-        # Готовим двухуровневый кеш: {"components": {name: [cves]}}
-        cache_root = self.node.properties.setdefault(
-            "security_passport_cache", {"components": {}, "version": 1}
-        )
+        cache_root = self._cache_root()
         comp_cache = cache_root.setdefault("components", {})
         # Фиксируем все ключи, которые мы реально использовали в этой сессии —
         # по завершении сборки паспорта вычистим устаревшие.
@@ -277,8 +304,7 @@ class SecurityPassportDialog:
         Ключ кеша: 'proto::<name>'
         """
         cache_key = f"proto::{protocol_name}"
-        cache_root = self.node.properties.setdefault(
-            "security_passport_cache", {"components": {}, "version": 1})
+        cache_root = self._cache_root()
         comp_cache = cache_root.setdefault("components", {})
         if not hasattr(self, "_cache_used_keys"):
             self._cache_used_keys = set()
@@ -322,7 +348,9 @@ class SecurityPassportDialog:
         Использует NodeDecomposition для генерации всех разделов
         с правильными индексами и порядком по эталону.
         """
-        from models.osi_decomposition import NodeDecomposition, OSILevel
+        from models.osi_decomposition import (
+            NodeDecomposition, OSILevel, level_code_for)
+        from utils.level_filter import filter_cves_by_level
 
         decomp = NodeDecomposition(self.node)
         os_label = components.get("os", "") or ""
@@ -402,14 +430,89 @@ class SecurityPassportDialog:
                 else:
                     all_cves = []
 
+                # Отбор по уровню модели УБИ. Выборка по CPE относится
+                # к продукту целиком (у microsoft/windows это 17 611 записей),
+                # поэтому без второго фильтра в строку «TCP» попадали Samba,
+                # RSHSVC и пустые пароли администратора. Пустой результат
+                # допустим: в эталонном паспорте у многих компонентов прочерк.
+                all_cves = filter_cves_by_level(
+                    all_cves,
+                    level_code=level_code_for(comp),
+                    component_name=comp.name,
+                    limit=10,
+                )
+
+                # Отечественные компоненты часто отсутствуют в NVD: у них нет
+                # CVE, но записи в БДУ ФСТЭК есть — 20 277 записей содержат
+                # номер реестра российских программ прямо в наименовании
+                # продукта. Для таких компонентов ищем в БДУ напрямую.
+                # Фильтр по уровню здесь не применяется: релевантность уже
+                # обеспечена поиском по точному наименованию изделия,
+                # а профили уровней рассчитаны на англоязычные описания NVD.
+                if (not all_cves
+                        and self.bdu_db is not None
+                        and getattr(self.bdu_db, "available", False)
+                        and comp.component_type in ("hardware", "software", "peripheral")
+                        and len(spec) >= 4):
+                    domestic = self.bdu_db.search_by_product(product=spec, limit=40)
+                    domestic.sort(key=lambda r: r["cvss_v3_score"] or 0.0, reverse=True)
+                    all_cves = [{
+                        "cve_id": rec["cve_id"] or "--",
+                        "cvss_v3": rec["cvss_v3_score"],
+                        "cwe_id": rec["cwe_id"],
+                        "description": rec["description"],
+                        "published": rec["publish_date"],
+                        "bdu_id": rec["bdu_id"],
+                    } for rec in domestic[:10]]
+
+                # Записи БДУ ФСТЭК для найденных CVE — одним запросом
+                bdu_map = {}
+                if (self.bdu_db is not None and getattr(self.bdu_db, "available", False)
+                        and all_cves):
+                    bdu_map = self.bdu_db.get_many_by_cve(
+                        [c.get("cve_id", "") for c in all_cves])
+
+                # Вхождение в реестры отечественного ПО (Минцифры, ГИСП).
+                # Пункт 23 Методики отдельно выделяет зарубежные средства
+                # и ПО с открытым кодом, поэтому различие показывается в паспорте.
+                # Протоколы и подсистемы ОС в реестрах не значатся — для них прочерк.
+                registry = "--"
+                if comp.component_type in ("hardware", "software", "peripheral"):
+                    # Самый надёжный источник — номер реестра, который БДУ
+                    # указывает прямо в наименовании продукта:
+                    # «РЕД ОС (запись в едином реестре российских программ №3751)».
+                    # Номер берётся только из того фрагмента перечисления, где
+                    # упомянут сам компонент, иначе процессор AMD унаследует
+                    # номер соседней отечественной ОС из той же записи.
+                    registry_number = next(
+                        (num for num in (
+                            self.bdu_db.registry_number_for(rec.get("product", ""), spec)
+                            for rec in bdu_map.values()) if num),
+                        "") if self.bdu_db is not None else ""
+                    if registry_number:
+                        registry = f"Минцифры №{registry_number}"
+                    elif self.catalog is not None:
+                        try:
+                            registry = self.catalog.registry_label(title=spec)
+                        except Exception:
+                            registry = "--"
+
                 section_items.append({
                     "is_header": True,
                     "identifier": comp.identifier,
                     "component_type": obj_name,
                     "component_name": spec,
                     "spec": "",
+                    "registry": registry,
                     "cves_count": len(all_cves)
                 })
+
+                def _bdu_id(cve_row: Dict) -> str:
+                    """Идентификатор БДУ для строки или прочерк, если записи нет."""
+                    if cve_row.get("bdu_id"):
+                        return cve_row["bdu_id"]
+                    record = bdu_map.get(cve_row.get("cve_id", ""))
+                    return record["bdu_id"] if record else "--"
 
                 if all_cves:
                     for cve_data in all_cves[:10]:
@@ -428,6 +531,7 @@ class SecurityPassportDialog:
                                 "is_header": False,
                                 "cwe": raw_cwe,
                                 "cve": cve_data.get('cve_id', '--'),
+                                "bdu": _bdu_id(cve_data),
                                 "cvss_v3": cve_data.get('cvss_v3', '--'),
                                 "capec": f"CAPEC-{capecs[0]['capec_id']}",
                                 "stage": self.capec_db.get_bdu_stage(capecs[0]['capec_id']),
@@ -439,6 +543,7 @@ class SecurityPassportDialog:
                                     "is_header": False,
                                     "cwe": "",
                                     "cve": "",
+                                    "bdu": "",
                                     "cvss_v3": "",
                                     "capec": f"CAPEC-{cap['capec_id']}",
                                     "stage": self.capec_db.get_bdu_stage(cap['capec_id']),
@@ -449,6 +554,7 @@ class SecurityPassportDialog:
                                 "is_header": False,
                                 "cwe": raw_cwe,
                                 "cve": cve_data.get('cve_id', '--'),
+                                "bdu": _bdu_id(cve_data),
                                 "cvss_v3": cve_data.get('cvss_v3', '--'),
                                 "capec": "--", "stage": "--",
                                 "is_capec_continuation": False,
@@ -456,7 +562,7 @@ class SecurityPassportDialog:
                 else:
                     section_items.append({
                         "is_header": False, "cwe": "--", "cve": "--",
-                        "cvss_v3": "--", "capec": "--", "stage": "--",
+                        "bdu": "--", "cvss_v3": "--", "capec": "--", "stage": "--",
                         "is_capec_continuation": False,
                     })
 
@@ -616,21 +722,24 @@ class SecurityPassportDialog:
                         font=('Segoe UI', 11, 'bold'), height=36)
 
         columns = ("Идентификатор", "Наименование объекта", "Спецификация",
-                   "CWE", "CVE", "CVSS V3.1", "CAPEC", "Этап ККА")
+                   "Реестр", "CWE", "CVE", "БДУ ФСТЭК", "CVSS V3.1",
+                   "CAPEC", "Этап ККА")
 
         self.tree = ttk.Treeview(parent, columns=columns, show="headings", height=25, selectmode="browse")
 
         for col in columns:
             self.tree.heading(col, text=col)
 
-        self.tree.column("Идентификатор", width=140, anchor='center')
-        self.tree.column("Наименование объекта", width=220, anchor='w')
-        self.tree.column("Спецификация", width=280, anchor='w')
-        self.tree.column("CWE", width=90, anchor='center')
-        self.tree.column("CVE", width=150, anchor='center')
-        self.tree.column("CVSS V3.1", width=90, anchor='center')
-        self.tree.column("CAPEC", width=180, anchor='w')
-        self.tree.column("Этап ККА", width=200, anchor='center')
+        self.tree.column("Идентификатор", width=120, anchor='center')
+        self.tree.column("Наименование объекта", width=200, anchor='w')
+        self.tree.column("Спецификация", width=250, anchor='w')
+        self.tree.column("Реестр", width=130, anchor='center')
+        self.tree.column("CWE", width=85, anchor='center')
+        self.tree.column("CVE", width=140, anchor='center')
+        self.tree.column("БДУ ФСТЭК", width=130, anchor='center')
+        self.tree.column("CVSS V3.1", width=80, anchor='center')
+        self.tree.column("CAPEC", width=160, anchor='w')
+        self.tree.column("Этап ККА", width=190, anchor='center')
 
         vsb = ttk.Scrollbar(parent, orient="vertical", command=self.tree.yview)
         hsb = ttk.Scrollbar(parent, orient="horizontal", command=self.tree.xview)
@@ -653,13 +762,16 @@ class SecurityPassportDialog:
             self.tree.delete(item)
 
         if not passport_data:
-            self.tree.insert("", tk.END, values=("—", "Нет данных", "Компоненты не найдены", "—", "—", "—", "—", "—"))
+            self.tree.insert("", tk.END, values=(
+                "—", "Нет данных", "Компоненты не найдены",
+                "—", "—", "—", "—", "—", "—", "—"))
             self.status_label.configure(text="ℹ️ Нет данных для анализа", text_color="gray")
             self.count_label.configure(text="(0)")
             return
 
         for section in passport_data:
-            self.tree.insert("", tk.END, values=("", section["title"], "", "", "", "", "", ""),
+            self.tree.insert("", tk.END,
+                             values=("", section["title"], "", "", "", "", "", "", "", ""),
                              tags=('section_header',))
 
             for item in section["items"]:
@@ -668,15 +780,17 @@ class SecurityPassportDialog:
                         item.get('identifier', ''),
                         item.get('component_type', ''),
                         item.get('component_name', ''),
+                        item.get('registry', '--'),
                         f"🔍 Уязвимостей: {item.get('cves_count', 0)}",
-                        "", "", "", ""
+                        "", "", "", "", ""
                     ), tags=('component_header',))
                 else:
                     tags = ('capec_continuation',) if item.get('is_capec_continuation') else ()
                     self.tree.insert("", tk.END, values=(
-                        "", "", "",
+                        "", "", "", "",
                         item.get('cwe', ''),
                         item.get('cve', ''),
+                        item.get('bdu', '--'),
                         item.get('cvss_v3', ''),
                         item.get('capec', '--'),
                         item.get('stage', '--')
@@ -898,7 +1012,7 @@ class SecurityPassportDialog:
         total_cves = sum(
             1 for tags, v in rows
             if not ("section_header" in tags or "component_header" in tags)
-            and v[4] and v[4] != "--"
+            and v[5] and v[5] != "--"
         )
         story.append(Paragraph(
             f"Всего найдено уязвимостей: <b>{total_cves}</b>",
@@ -909,7 +1023,8 @@ class SecurityPassportDialog:
         # Таблица
         headers = [
             "Идентификатор", "Наименование объекта", "Спецификация",
-            "CWE", "CVE", "CVSS V3.1", "CAPEC", "Этап ККА"
+            "Реестр", "CWE", "CVE", "БДУ ФСТЭК", "CVSS V3.1",
+            "CAPEC", "Этап ККА"
         ]
         table_data = [[Paragraph(h, ParagraphStyle(
             "HeadRu", fontName=font_bold, fontSize=9, textColor=colors.white, alignment=1
@@ -942,15 +1057,18 @@ class SecurityPassportDialog:
                 style_cmds.append(("FONTNAME", (0, idx), (-1, idx), font_bold))
 
         # Ширина колонок — подбираем под альбомный A4 (≈ 277 мм полезной ширины)
+        # Сумма ширин — 277 мм, полезная ширина альбомного A4
         col_widths = [
-            22 * mm,  # Идентификатор
-            38 * mm,  # Наименование
-            48 * mm,  # Спецификация
-            20 * mm,  # CWE
-            40 * mm,  # CVE
-            18 * mm,  # CVSS V3.1
-            45 * mm,  # CAPEC
-            46 * mm,  # Тактика ФСТЭК
+            20 * mm,  # Идентификатор
+            34 * mm,  # Наименование объекта
+            40 * mm,  # Спецификация
+            24 * mm,  # Реестр
+            18 * mm,  # CWE
+            34 * mm,  # CVE
+            28 * mm,  # БДУ ФСТЭК
+            15 * mm,  # CVSS V3.1
+            32 * mm,  # CAPEC
+            32 * mm,  # Этап ККА
         ]
 
         table = Table(table_data, colWidths=col_widths, repeatRows=1)
